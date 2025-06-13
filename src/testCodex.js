@@ -1,5 +1,5 @@
-import { OpenAI } from 'openai';
-import dotenv from 'dotenv';
+const { OpenAI } = require('openai');
+const dotenv = require('dotenv');
 
 dotenv.config();
 
@@ -11,7 +11,7 @@ async function test() {
   const chat = await openai.chat.completions.create({
     model: 'gpt-4',
     messages: [
-      { role: 'user', content: 'Say hi like a witch.' },
+      { role: 'user', content: 'Say hi like a witch' }
     ],
   });
 
