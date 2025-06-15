@@ -1,0 +1,20 @@
+{
+  "name": "wilhelmina-bot",
+  "version": "0.1.0",
+  "description": "Occult-themed Discord bot",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "echo \"No tests specified\" && exit 0"
+  },
+  "engines": {
+    "node": ">=16.9.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.0.0",
+    "axios": "^1.4.0",
+    "mongoose": "^7.0.0",
+    "luxon": "^3.0.0",
+    "node-cron": "^3.0.0"
+  }
+}
