@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder } from 'discord.js';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
@@ -8,45 +8,46 @@ const openai = new OpenAI({
 export default {
   data: new SlashCommandBuilder()
     .setName('openbisquitte')
-    .setDescription('Summon a stylized fortune from Wilhelmina\u2019s cracked pastry of fate.'),
+    .setDescription('Crack open a mystical biscuit'),
   async execute(interaction) {
     try {
-      const completion = await openai.completions.create({
-        model: 'text-davinci-003',
-        prompt:
-          'Generate a one-sentence fortune that could be delivered by a surreal, magical biscuit in a whimsical yet ominous world. The tone should be randomly chosen between hopeful, cryptic, or dark, and the language should be poetic, metaphorical, or unsettling. Avoid clich\u00e9s and fortune cookie tropes\u2014favor strange imagery, subtle tension, or quiet beauty.',
+      const prompt = 'Provide a short, mystical fortune as if from a fortune cookie.';
+      const chat = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
         max_tokens: 30,
         temperature: 0.8,
       });
 
-      const fortune = completion.choices[0].text.trim();
+      let fortune = chat?.choices?.[0]?.message?.content?.trim();
+      if (!fortune) fortune = 'The biscuit has crumbled into silence.';
 
       const templates = [
-`╔═══════ ❖ 𝕺𝖕𝖊𝖓𝕭𝖎𝖘𝖖𝖚𝖎𝖙𝖙𝖊 ❖ ═══════╗
+        `╔═══════ ❖ 𝕺𝖕𝖊𝖓𝕭𝖎𝖘𝖖𝖚𝖎𝖙𝖙𝖊 ❖ ═══════╗
        🜁  A parchment unfurls within the crumbs...
        ❝ {fortune} ❞
 ╚═════════════════════════════════╝`,
-`╭┈────── ∘°❉°∘ ──────┈╮
+        `╭┈────── ∘°❉°∘ ──────┈╮
      🥠 𝓞𝓹𝓮𝓷𝓑𝓲𝓼𝓺𝓾𝓲𝓽𝓽𝓮 𝓌𝒽𝒾𝓈𝓅𝑒𝓇𝓈...
      ❝ {fortune} ❞
 ╰┈────── ∘°❉°∘ ──────┈╯`,
-`╔═━「 ✦ 𝒪𝓅𝑒𝓃 𝐵𝒾𝓈𝓆𝓊𝒾𝓉𝓉𝑒 ✦ 」━═╗
+        `╔═━「 ✦ 𝒪𝓅𝑒𝓃 𝐵𝒾𝓈𝓆𝓊𝒾𝓉𝓉𝑒 ✦ 」━═╗
     ✦ [The bisquitte has spoken.] ✦
     ❝ {fortune} ❞
 ╚══════════════════════════════════╝`,
-`╓───── ·𖥸· ─────╖
+        `╓───── ·𖥸· ─────╖
   🍪 𝒪𝓅𝑒𝓃 𝐵𝒾𝓈𝒸𝓊𝒾𝓉𝓉𝑒
   ❝ {fortune} ❞
 ╙───── ·𖥸· ─────╜`,
-`╭🌙⋆⁺₊❖ 𝒪𝓅𝑒𝓃𝐵𝒾𝓈𝓆𝓊𝒾𝓉𝓉𝑒 ❖₊⁺⋆🌙╮
+        `╭🌙⋆⁺₊❖ 𝒪𝓅𝑒𝓃𝐵𝒾𝓈𝓆𝓊𝒾𝓉𝓉𝑒 ❖₊⁺⋆🌙╮
      🜃 “{fortune}”
 ╰🌙⋆⁺₊───────────────₊⁺⋆🌙╯`,
       ];
 
       const template = templates[Math.floor(Math.random() * templates.length)];
-      const message = template.replace('{fortune}', fortune);
+      const content = template.replace('{fortune}', fortune);
 
-      await interaction.reply({ content: message });
+      await interaction.reply({ content });
     } catch (error) {
       console.error(error);
       if (!interaction.replied) {
