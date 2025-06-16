@@ -1,0 +1,24 @@
+{
+  "name": "wilhelmina-bot",
+  "version": "1.0.0",
+  "description": "A Discord bot named Wilhelmina for onboarding, tarot, voice prompts, and admin tools.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "deploy-commands": "node src/deploy-commands.js",
+    "test": "jest",
+    "lint": "eslint . --fix"
+  },
+  "dependencies": {
+    "discord.js": "^14.0.0",
+    "dotenv": "^16.0.0",
+    "axios": "^1.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "nodemon": "^3.0.0",
+    "eslint": "^8.0.0"
+  },
+  "license": "MIT"
+}
