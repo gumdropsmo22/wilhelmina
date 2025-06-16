@@ -1,15 +1,18 @@
+Here’s the fully merged, conflict-free `src/commands/roll.js`. All conflict markers are removed and both flows (numeric and sex die) are preserved:
+
+```js
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const diceConfig = {
-  d4: { sides: 4, name: '𝑸𝑼𝑨𝑫𝑹𝑨𝑵𝑻', decor: '❖', tone: 'sharp, impatient, directional' },
-  d6: { sides: 6, name: '𝑽𝑬𝑪𝑻𝑶𝑹', decor: '✦', tone: 'structured, efficient, logical' },
-  d8: { sides: 8, name: '𝑶𝑪𝑻𝑨𝑽𝑨', decor: '✧', tone: 'mysterious, pattern-aware' },
-  d12: { sides: 12, name: '𝒁𝑶𝑫𝑰𝑨𝑲', decor: '✦', tone: 'oracular, weighty, astrological' },
-  d20: { sides: 20, name: '𝑨𝑹𝑪𝑨𝑵𝑨', decor: '✦', tone: 'awe-filled, irreversible' },
-  sex: { name: 'THE LESSER VEIL', decor: '❥', tone: 'sultry, ominous' }
+  d4: { sides: 4,  name: '𝑸𝑼𝑨𝑫𝑹𝑨𝑵𝑻', decor: '❖', tone: 'sharp, impatient, directional' },
+  d6: { sides: 6,  name: '𝑽𝑬𝑪𝑻𝑶𝑹', decor: '✦', tone: 'structured, efficient, logical' },
+  d8: { sides: 8,  name: '𝑶𝑪𝑻𝑨𝑽𝑨', decor: '✧', tone: 'mysterious, pattern-aware' },
+  d12:{ sides:12, name: '𝒁𝑶𝑫𝑰𝑨𝑲', decor: '✦', tone: 'oracular, weighty, astrological' },
+  d20:{ sides:20, name: '𝑨𝑹𝑪𝑨𝑵𝑨', decor: '✦', tone: 'awe-filled, irreversible' },
+  sex:{           name: 'THE LESSER VEIL', decor: '❥', tone: 'sultry, ominous' }
 };
 
 const positions = [
@@ -45,7 +48,7 @@ export default {
           { name: 'd8',  value: 'd8' },
           { name: 'd12', value: 'd12' },
           { name: 'd20', value: 'd20' },
-          { name: 'sex', value: 'sex' },
+          { name: 'sex', value: 'sex' }
         )
     ),
 
@@ -57,16 +60,14 @@ export default {
       }
 
       const { name, decor, tone } = diceConfig[input];
-      let total = 0;
-      let sides;
 
-      // Sex die flow
+      // SEX DIE FLOW
       if (input === 'sex') {
         const position = positions[Math.floor(Math.random() * positions.length)];
         const act      = acts[Math.floor(Math.random() * acts.length)];
         const location = locations[Math.floor(Math.random() * locations.length)];
 
-        const response = await openai.chat.completions.create({
+        const chat = await openai.chat.completions.create({
           model: 'gpt-3.5-turbo',
           messages: [
             { role: 'system', content: 'You are Wilhelmina, an occult oracle.' },
@@ -76,29 +77,33 @@ export default {
             }
           ],
           max_tokens: 50,
-          temperature: 0.9
+          temperature: 0.9,
         });
 
-        const comment   = response.choices[0].message.content.trim();
+        const comment   = chat.choices[0].message.content.trim();
         const resultStr = `${decor} ${name} ${decor}`;
-        const embed     = new EmbedBuilder().setDescription(
-          `\`\`\`\n${resultStr}\n❝ ${comment} ❞\n\`\`\``
-        );
 
+        const embed = new EmbedBuilder().setDescription(
+          `\`\`\`
+${resultStr}
+❝ ${comment} ❞
+\`\`\``
+        );
         await interaction.reply({ embeds: [embed] });
         return;
       }
 
-      // Numeric dice flow
+      // NUMERIC DICE FLOW
       const match = input.match(/^(\d*)\s*d\s*(\d+)([+\-]\s*\d+)?$/i);
       if (!match) {
         throw new Error('Invalid dice notation. Try d6 or 2d20+5.');
       }
 
       const count    = match[1] ? parseInt(match[1], 10) : 1;
-      sides          = parseInt(match[2], 10);
+      const sides    = parseInt(match[2], 10);
       const modifier = match[3] ? parseInt(match[3].replace(/\s+/g, ''), 10) : 0;
 
+      let total = 0;
       for (let i = 0; i < count; i++) {
         total += Math.floor(Math.random() * sides) + 1;
       }
@@ -106,7 +111,7 @@ export default {
 
       const resultStr = `${decor} ${name} (d${sides}) → ${total} ${decor}`;
 
-      const response = await openai.chat.completions.create({
+      const chat = await openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [
           { role: 'system', content: 'You are Wilhelmina, an occult oracle.' },
@@ -119,12 +124,16 @@ export default {
         temperature: 0.9
       });
 
-      const comment = response.choices[0].message.content.trim();
-      const embed   = new EmbedBuilder().setDescription(
-        `\`\`\`\n${resultStr}\n❝ ${comment} ❞\n\`\`\``
-      );
+      const comment = chat.choices[0].message.content.trim();
 
+      const embed = new EmbedBuilder().setDescription(
+        `\`\`\`
+${resultStr}
+❝ ${comment} ❞
+\`\`\``
+      );
       await interaction.reply({ embeds: [embed] });
+
     } catch (err) {
       console.error(err);
       if (!interaction.replied) {
@@ -133,3 +142,6 @@ export default {
     }
   }
 };
+```
+
+Just replace your file with this, commit the resolution, merge the PR, and delete the feature branch.
