@@ -1,0 +1,2 @@
+EMBEDS_ONLY = True
+ENABLE_COOLDOWNS = False
