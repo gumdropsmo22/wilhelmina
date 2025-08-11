@@ -28,7 +28,11 @@ Copy `.env.example` to `.env` and edit the values for your environment:
 cp .env.example .env
 # then edit .env with your favorite editor
 ```
-Fill in your Discord credentials, MongoDB connection string, and any optional API keys.
+Required now:
+- `DISCORD_TOKEN`
+Optional placeholders for later tasks:
+- `OPENAI_API_KEY`, `MONGO_URL`, `TZ=Asia/Riyadh`
+Never commit real secrets.
 
 ## Usage
 
@@ -45,6 +49,12 @@ The project exposes several npm scripts. Use `npm run <script>` to execute them.
 ## Contributing
 
 Contributions are welcome! Fork the repository, create a feature branch, and open a pull request describing your changes. Please keep commits concise and follow existing coding conventions.
+
+Enable local hooks (first time only):
+
+```bash
+pre-commit install
+```
 
 ## License
 
