@@ -1,10 +1,38 @@
+import json
 import random
+import pathlib
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, persona
 from config import settings
+
+
+DATA = pathlib.Path("data")
+
+
+def _is_prime(n: int) -> bool:
+    if n < 2:
+        return False
+    for i in range(2, int(n ** 0.5) + 1):
+        if n % i == 0:
+            return False
+    return True
+
+
+def _lore_for_number(n: int) -> str:
+    try:
+        lore_map = json.loads((DATA / "roll_lore.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        lore_map = {}
+    if str(n) in lore_map:
+        return lore_map[str(n)]
+    if _is_prime(n):
+        return "Prime and indivisible—alone in the void."
+    if n % 2 == 0:
+        return "Even and dull—symmetry bores me."
+    return "Odd and unruly—just my style."
 
 
 class Oracles(commands.Cog):

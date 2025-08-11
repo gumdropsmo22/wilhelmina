@@ -37,3 +37,12 @@ def system_embed(header: str = None, description: str = "", include_trace: bool 
     # Footer with custom protocol URL and glitch icon
     embed.set_footer(text="haunt://coven/wilhelmina", icon_url="cdn/glitch-dot.gif")
     return embed
+
+
+def build_embed(title: str, description: str = "") -> discord.Embed:
+    """Return a basic system-styled embed."""
+    embed = discord.Embed(title=title, description=description, color=0x6E00FF)
+    embed.set_author(name="WILHELMINA • SYSTEM", icon_url="cdn/witch-sigil.png")
+    embed.set_footer(text="haunt://coven/wilhelmina", icon_url="cdn/glitch-dot.gif")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
