@@ -1,9 +1,15 @@
 {
-  "name": "wilhelmina-bot",
+  "name": "wilhelmina-archived",
+  "private": true,
+  "_note": "Archived as part of cleanup sprint C1. Not used by root build/CI.",
+  "_status": "archived",
+  "_owner": "gumdropsmo22",
+  "_todo": "Update only if you must reproduce the old Node runtime.",
   "version": "0.1.0",
   "description": "Wilhelmina Discord bot with onboarding and mystical features",
   "main": "src/testCodex.js",
   "scripts": {
+    "//": "Archived; scripts preserved for reference.",
     "start": "node src/testCodex.js",
     "dev": "nodemon src/testCodex.js",
     "test": "echo \"No tests yet\" && exit 0"

@@ -1,51 +1,38 @@
 # Wilhelmina Bot
+Python-only runtime (cleanup sprint).
 
-Wilhelmina is a Discord bot that offers onboarding assistance, tarot readings, voice interactions and administrative tools. It is designed to help manage your server while providing fun and useful commands for members.
+The Node implementation has been archived under `archive/node/`. From now on,
+all runtime and development commands use Python tooling only. See `pyproject`/`requirements`
+and `Makefile` at the repo root.
 
-## Prerequisites
+> Historical JS/TS code and npm scripts are preserved in `archive/node/`
+> but are **not** part of the build or CI anymore.
 
-- **Node.js** v16 or newer
-- **Git** for cloning the repository
-- **MongoDB** instance for data storage
-- A configured **Discord application** with bot token, client ID, and guild ID
-
-## Installation
-
-1. Clone the repository
-   ```bash
-   git clone https://github.com/your-org/wilhelmina.git
-   cd wilhelmina
-   ```
-2. Run the bootstrap script to install dependencies and create a base `.env` file
-   ```bash
-   ./bootstrap.sh
-   ```
-
-## Configuration
-
-Copy `.env.example` to `.env` and edit the values for your environment:
-```bash
-cp .env.example .env
-# then edit .env with your favorite editor
+## Installation (Python)
+See `Makefile` for common tasks:
 ```
-Fill in your Discord credentials, MongoDB connection string, and any optional API keys.
+make venv        # create venv
+make install     # install Python deps
+make run         # run the bot
+```
 
-## Usage
+## Quickstart
+```bash
+make install
+make run
+```
 
-The project exposes several npm scripts. Use `npm run <script>` to execute them.
+## Developer scripts
+```bash
+make fmt    # black
+make lint   # ruff
+make type   # mypy (loose; tightened later)
+make test   # pytest
+```
 
-| Script       | Purpose                                        |
-|--------------|------------------------------------------------|
-| `start`      | Launch the production bot                      |
-| `dev`        | Start the bot in development mode with reloads |
-| `test`       | Run project tests                              |
-| `lint`       | Lint the codebase for style issues             |
-| `deploy-commands` | Register/update slash commands            |
+## Environment
+Provide `DISCORD_TOKEN` in your shell or `.env`. (C4 will add `.env.example` refinement.)
 
-## Contributing
-
-Contributions are welcome! Fork the repository, create a feature branch, and open a pull request describing your changes. Please keep commits concise and follow existing coding conventions.
-
-## License
-
-MIT © 2025
+## Node (archived)
+If you need the previous Node prototype, consult `archive/node/README.md`.
+It is **unsupported** and excluded from CI.

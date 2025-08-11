@@ -1,0 +1,12 @@
+discord.py>=2.4.0
+python-dotenv>=1.0.1
+httpx>=0.27.0
+pydantic>=2.8.2
+pytest>=8.2.0
+pytest-asyncio>=0.23.8
+black>=24.8.0
+ruff>=0.5.7
+mypy>=1.11.1
+types-requests
+types-python-dateutil
+# C6 will add structured logging deps (e.g., structlog or loguru) if we choose.

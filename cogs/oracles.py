@@ -1,66 +1,74 @@
+from __future__ import annotations
 import random
-import discord
-from discord import app_commands
 from discord.ext import commands
+import discord
+from utils.embeds import build_embed
+from utils.persona import say
+import json
+from pathlib import Path
 
-from utils import embeds, persona
-from config import settings
+DATA_DIR = Path("data")
 
+def _load_json(name: str):
+    p = DATA_DIR / name
+    with p.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+ROLL_LORE = _load_json("roll_lore.json")
+FORTUNES = _load_json("fortunes.json")
 
 class Oracles(commands.Cog):
-    """Cog registering oracle slash commands: /roll, /8ball, and /fortune."""
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # /roll command: roll a die and give an ominous interpretation
-    @app_commands.command(name="roll", description="Roll a divination die and receive Wilhelmina's reading.")
-    @app_commands.describe(sides="Number of sides on the die (2-1000).")
-    async def roll(self, interaction: discord.Interaction, sides: app_commands.Range[int, 2, 1000]):
-        # Perform the random roll
+    @commands.hybrid_command(name="roll", description="Rolls a divination die.")
+    async def roll(self, ctx: commands.Context, sides: int = 20):
+        sides = max(2, min(1000, sides))
         result = random.randint(1, sides)
-        # Construct the embed content
-        header = "▒▒ DIVINATION: ROLL ▒▒"
-        dice_info = f"You rolled **d{sides} → {result}**"
-        lore_line = persona.number_lore(result)
-        description = f"{dice_info}\n{result}. {lore_line}"
-        # Build the embed with a trace field for extra glitchy detail
-        embed = embeds.system_embed(header=header, description=description, include_trace=True)
-        await interaction.response.send_message(embed=embed)
+        lore = ROLL_LORE.get(str(result)) or _lore_for_number(result)
+        emb = build_embed(title="▒▒ DIVINATION: ROLL ▒▒", description=f"**{result}**\n{lore}")
+        await ctx.reply(embed=emb, mention_author=False)
 
-    # /8ball command: answer a yes/no question with Wilhelmina's oracle
-    @app_commands.command(name="8ball", description="Ask the Oracle a question and receive Wilhelmina's answer.")
-    @app_commands.describe(question="Your yes/no question for Wilhelmina's oracle.")
-    async def eight_ball(self, interaction: discord.Interaction, question: str):
-        # Handle missing question (shouldn't happen with required param, but just in case)
-        if question is None or question.strip() == "":
-            scold = "You dare seek wisdom without a question? Pathetic."
-            embed = embeds.system_embed(header="▒▒ ORACLE: 8-BALL ▒▒", description=f"A: {scold}")
-            await interaction.response.send_message(embed=embed)
-            return
-        # Determine intent with weighted probabilities: 10 yes, 10 no, 5 maybe, 5 ask-again
-        categories = (["yes"] * 10) + (["no"] * 10) + (["maybe"] * 5) + (["ask-again"] * 5)
-        intent = random.choice(categories)
-        answer = persona.generate_eight_ball(intent)
-        # Format the question and answer in the embed description
-        q_text = question.strip()
-        # Wrap question in quotes (choose quote style that avoids duplication of any internal quotes)
-        if '"' in q_text and "'" not in q_text:
-            q_display = f"'{q_text}'"
-        else:
-            q_display = f'"{q_text}"'
-        description = f"Q: {q_display}\nA: {answer}"
-        embed = embeds.system_embed(header="▒▒ ORACLE: 8-BALL ▒▒", description=description)
-        await interaction.response.send_message(embed=embed)
+    @commands.hybrid_command(name="fortune", description="One eerie fortune line.")
+    async def fortune(self, ctx: commands.Context):
+        line = random.choice(FORTUNES)
+        emb = build_embed(title="▒▒ FORTUNE ▒▒", description=line)
+        await ctx.reply(embed=emb, mention_author=False)
 
-    # /fortune command: deliver a cursed fortune cookie line
-    @app_commands.command(name="fortune", description="Crack open a cursed fortune cookie from Wilhelmina.")
-    async def fortune(self, interaction: discord.Interaction):
-        fortune_text = persona.generate_fortune()
-        embed = embeds.system_embed(header="▒▒ FORTUNE ▒▒", description=fortune_text)
-        await interaction.response.send_message(embed=embed)
+    @commands.hybrid_command(name="eightball", description="Mystic 8-ball.")
+    async def eightball(self, ctx: commands.Context):
+        # Weighted categories per spec: Yes 33%, No 33%, Maybe 17%, Ask Again 17%.
+        pick = random.choices(
+            population=["yes","no","maybe","again"],
+            weights=[33,33,17,17],
+            k=1
+        )[0]
+        options = {
+            "yes": [say("Signs say yes."), say("The mirror nods.")],
+            "no": [say("No, the veil refuses."), say("Not tonight.")],
+            "maybe": [say("The smoke swirls… maybe."), say("Unclear omens.")],
+            "again": [say("Ask again, witchling."), say("The cards hiss—retry.")],
+        }
+        emb = build_embed(title="▒▒ ORACLE: 8-BALL ▒▒", description=random.choice(options[pick]))
+        await ctx.reply(embed=emb, mention_author=False)
 
-
-# Cog setup function (registers the cog if embeds-only mode is active)
 async def setup(bot: commands.Bot):
-    if getattr(settings, "EMBEDS_ONLY", True):
-        await bot.add_cog(Oracles(bot))
+    await bot.add_cog(Oracles(bot))
+
+def _lore_for_number(n: int) -> str:
+    if n in (13, 66, 77, 111, 333):
+        return say("An omen trembles through the wires.")
+    if _is_prime(n):
+        return say("Indivisible. Alone. Resonant.")
+    if n % 2 == 0:
+        return say("Dull symmetry hums.")
+    return say("Odd chaos stirs.")
+
+def _is_prime(n: int) -> bool:
+    if n < 2: return False
+    if n % 2 == 0: return n == 2
+    f = 3
+    while f * f <= n:
+        if n % f == 0: return False
+        f += 2
+    return True

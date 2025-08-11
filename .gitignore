@@ -1,2 +1,8 @@
-# Ignore environment files
+node_modules/
+archive/node/node_modules/
+dist/
+.venv/
+.pytest_cache/
+__pycache__/
+.DS_Store
 .env
