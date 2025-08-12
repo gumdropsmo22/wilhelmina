@@ -1,0 +1,46 @@
+﻿import os, asyncio
+import discord
+from discord.ext import commands
+from dotenv import load_dotenv
+
+load_dotenv()
+APP_ENV = os.getenv("APP_ENV","development")
+DEV_GUILD_ID = os.getenv("DEV_GUILD_ID")
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!", intents=intents)
+_synced = False
+
+@bot.event
+async def on_ready():
+    global _synced
+    print(f"Wilhelmina online as {bot.user} (guilds: {len(bot.guilds)})")
+    if not _synced:
+        try:
+            if APP_ENV == "development" and DEV_GUILD_ID:
+                guild = discord.Object(id=int(DEV_GUILD_ID))
+                synced = await bot.tree.sync(guild=guild)
+                print(f"[DEV] Synced {len(synced)} commands to guild {DEV_GUILD_ID}")
+            else:
+                synced = await bot.tree.sync()
+                print(f"[GLOBAL] Synced {len(synced)} commands")
+        except Exception as e:
+            print(f"Sync failed: {e}")
+        _synced = True
+
+async def load_cogs():
+    try:
+        await bot.load_extension("cogs.oracles")
+    except Exception as e:
+        print(f"Note: could not load cogs.oracles ({e})")
+
+async def main():
+    async with bot:
+        await load_cogs()
+        await bot.start(TOKEN)
+
+if __name__ == "__main__":
+    if not TOKEN:
+        raise SystemExit("Missing DISCORD_TOKEN in environment.")
+    asyncio.run(main())
