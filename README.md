@@ -1,51 +1,30 @@
-# Wilhelmina Bot
+﻿# Wilhelmina Bot
 
 Wilhelmina is a Discord bot that offers onboarding assistance, tarot readings, voice interactions and administrative tools. It is designed to help manage your server while providing fun and useful commands for members.
 
 ## Prerequisites
-
-- **Node.js** v16 or newer
-- **Git** for cloning the repository
-- **MongoDB** instance for data storage
-- A configured **Discord application** with bot token, client ID, and guild ID
+- Python 3.11+
+- Git
+- MongoDB
+- A Discord application (bot token, client ID, guild ID)
 
 ## Installation
-
 1. Clone the repository
-   ```bash
-   git clone https://github.com/your-org/wilhelmina.git
+   git clone https://github.com/gumdropsmo22/wilhelmina.git
    cd wilhelmina
-   ```
-2. Run the bootstrap script to install dependencies and create a base `.env` file
-   ```bash
-   ./bootstrap.sh
-   ```
+2. Create a virtual environment and install dependencies
+   python -m venv .venv
+   # Windows:
+   .\.venv\Scripts\activate
+   # macOS/Linux:
+   source .venv/bin/activate
+   python -m pip install -r requirements.txt
 
 ## Configuration
-
-Copy `.env.example` to `.env` and edit the values for your environment:
-```bash
-cp .env.example .env
-# then edit .env with your favorite editor
-```
-Fill in your Discord credentials, MongoDB connection string, and any optional API keys.
+Copy .env.example to .env and fill values (Discord, MongoDB, optional APIs).
 
 ## Usage
-
-The project exposes several npm scripts. Use `npm run <script>` to execute them.
-
-| Script       | Purpose                                        |
-|--------------|------------------------------------------------|
-| `start`      | Launch the production bot                      |
-| `dev`        | Start the bot in development mode with reloads |
-| `test`       | Run project tests                              |
-| `lint`       | Lint the codebase for style issues             |
-| `deploy-commands` | Register/update slash commands            |
-
-## Contributing
-
-Contributions are welcome! Fork the repository, create a feature branch, and open a pull request describing your changes. Please keep commits concise and follow existing coding conventions.
+python bot.py
 
 ## License
-
 MIT © 2025
