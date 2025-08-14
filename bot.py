@@ -44,3 +44,4 @@ async def setup(bot: commands.Bot):
 async def load_cogs():
     await bot.load_extension('cogs.core')
 
+
