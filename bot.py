@@ -40,3 +40,7 @@ class Core(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Core(bot))
+
+async def load_cogs():
+    await bot.load_extension('cogs.core')
+
