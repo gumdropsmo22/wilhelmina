@@ -1,47 +1,47 @@
-﻿import os, time, platform
+﻿import asyncio, os
+from pathlib import Path
 import discord
-from discord import app_commands
 from discord.ext import commands
 
-class Core(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
+# load .env (no extra deps)
+envp = Path(".env")
+if envp.exists():
+    for line in envp.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k, v)
 
-    @app_commands.command(name="about", description="About this bot")
-    async def about(self, interaction: discord.Interaction):
-        msg = (
-            f"**Wilhelmina** skeleton is alive. "
-            f"Python {platform.python_version()} • discord.py {discord.__version__} "
-            f"• env={os.getenv('APP_ENV','development')}"
-        )
-        await interaction.response.send_message(msg, ephemeral=True)
+TOKEN = os.getenv("DISCORD_TOKEN")
+APP_ENV = os.getenv("APP_ENV", "development")
+DEV_GUILD_ID = os.getenv("DEV_GUILD_ID")
 
-    @app_commands.command(name="uptime", description="Show bot uptime")
-    async def uptime(self, interaction: discord.Interaction):
-        started = getattr(self.bot, "start_ts", time.time())
-        secs = int(time.time() - started)
-        h, r = divmod(secs, 3600); m, s = divmod(r, 60)
-        await interaction.response.send_message(f"Uptime: {h}h {m}m {s}s", ephemeral=True)
-
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.command(name="sync", description="Admin: resync slash commands")
-    async def sync(self, interaction: discord.Interaction):
-        if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("Admins only.", ephemeral=True)
-        dev = os.getenv("APP_ENV","development") == "development"
-        gid = os.getenv("DEV_GUILD_ID")
-        if dev and gid:
-            guild = discord.Object(id=int(gid))
-            self.bot.tree.copy_global_to(guild=guild)
-            synced = await self.bot.tree.sync(guild=guild)
-            return await interaction.response.send_message(f"Synced {len(synced)} cmds to dev guild.", ephemeral=True)
-        synced = await self.bot.tree.sync()
-        await interaction.response.send_message(f"Synced {len(synced)} cmds globally.", ephemeral=True)
-
-async def setup(bot: commands.Bot):
-    await bot.add_cog(Core(bot))
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 async def load_cogs():
-    await bot.load_extension('cogs.core')
+    await bot.load_extension("cogs.core")
 
+@bot.event
+async def on_ready():
+    print(f"Online as {bot.user}")
+    if APP_ENV == "development" and DEV_GUILD_ID:
+        guild = discord.Object(id=int(DEV_GUILD_ID))
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"[DEV] Synced {len(synced)} commands to guild {DEV_GUILD_ID}")
+    else:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} global commands")
 
+def main():
+    if not TOKEN:
+        raise SystemExit("Missing DISCORD_TOKEN in .env")
+    async def runner():
+        async with bot:
+            await load_cogs()
+            await bot.start(TOKEN)
+    asyncio.run(runner())
+
+if __name__ == "__main__":
+    main()
