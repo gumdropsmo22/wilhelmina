@@ -1,2 +1,12 @@
-# Ignore environment files
+﻿# Environment
 .env
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node artifacts (archived only)
+archive/node/node_modules/
+
