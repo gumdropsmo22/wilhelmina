@@ -1,4 +1,4 @@
-﻿import asyncio, os
+import asyncio, os
 from pathlib import Path
 import discord
 from discord.ext import commands
