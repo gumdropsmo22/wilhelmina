@@ -3,6 +3,9 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
+from utils.interactions import register_default_ephemeral
+from utils.errors import register_error_handler
+
 # load .env (no extra deps)
 envp = Path(".env")
 if envp.exists():
@@ -18,9 +21,12 @@ DEV_GUILD_ID = os.getenv("DEV_GUILD_ID")
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
+register_default_ephemeral(True)
+register_error_handler(bot)
 
 async def load_cogs():
     await bot.load_extension("cogs.core")
+    await bot.load_extension("cogs.help")
 
 @bot.event
 async def on_ready():
