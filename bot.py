@@ -1,4 +1,4 @@
-import asyncio, os
+﻿import asyncio, os
 from pathlib import Path
 import discord
 from discord.ext import commands
@@ -21,7 +21,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 async def load_cogs():
     await bot.load_extension("cogs.core")
-
+    await bot.load_extension("cogs.invite")
+    await bot.load_extension("cogs.ping")
+    await bot.load_extension("cogs.invite")
+    await bot.load_extension("cogs.ping")
 @bot.event
 async def on_ready():
     print(f"Online as {bot.user}")
@@ -45,3 +48,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+

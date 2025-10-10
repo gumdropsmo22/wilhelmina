@@ -1,14 +1,6 @@
-﻿# Environment
-.env
-
-# Python
 .venv/
 __pycache__/
-*.py[cod]
-.pytest_cache/
-
-# Node artifacts (archived only)
-archive/node/node_modules/
-
-
-.venv/
+*.pyc
+.env
+.DS_Store
+attic/**/.env

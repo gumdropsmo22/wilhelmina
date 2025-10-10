@@ -1,66 +1,71 @@
+from __future__ import annotations
 import random
 import discord
 from discord import app_commands
 from discord.ext import commands
+from typing import Literal
+from wilhelmina.services.language_engine import get_engine
 
-from utils import embeds, persona
-from config import settings
+DICE_CHOICES = [4, 6, 8, 10, 12, 20]
 
+def _haunted_embed(title: str, desc: str) -> discord.Embed:
+    e = discord.Embed(title=title, description=desc, color=0x6B46C1)
+    e.set_footer(text="⛧ Wilhelmina // Grand Coven")
+    return e
 
 class Oracles(commands.Cog):
-    """Cog registering oracle slash commands: /roll, /8ball, and /fortune."""
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self.engine = get_engine()
 
-    # /roll command: roll a die and give an ominous interpretation
-    @app_commands.command(name="roll", description="Roll a divination die and receive Wilhelmina's reading.")
-    @app_commands.describe(sides="Number of sides on the die (2-1000).")
-    async def roll(self, interaction: discord.Interaction, sides: app_commands.Range[int, 2, 1000]):
-        # Perform the random roll
+    @app_commands.command(name="roll", description="Roll one of six witchy dice.")
+    @app_commands.describe(dice="Choose a die.")
+    @app_commands.choices(dice=[app_commands.Choice(name=f"d{s}", value=s) for s in DICE_CHOICES])
+    async def roll(self, interaction: discord.Interaction, dice: app_commands.Choice[int]):
+        sides = dice.value
         result = random.randint(1, sides)
-        # Construct the embed content
-        header = "▒▒ DIVINATION: ROLL ▒▒"
-        dice_info = f"You rolled **d{sides} → {result}**"
-        lore_line = persona.number_lore(result)
-        description = f"{dice_info}\n{result}. {lore_line}"
-        # Build the embed with a trace field for extra glitchy detail
-        embed = embeds.system_embed(header=header, description=description, include_trace=True)
-        await interaction.response.send_message(embed=embed)
+        line = await self.engine.compose(
+            place="embed",
+            intent="roll-line",
+            variables={"sides": sides, "result": result},
+            fallback="The bones clatter; fate approves."
+        )
+        body = f"**You rolled:** d{sides} → **{result}**\n{line}"
+        await interaction.response.send_message(embed=_haunted_embed("Dice Divination", body))
 
-    # /8ball command: answer a yes/no question with Wilhelmina's oracle
-    @app_commands.command(name="8ball", description="Ask the Oracle a question and receive Wilhelmina's answer.")
-    @app_commands.describe(question="Your yes/no question for Wilhelmina's oracle.")
-    async def eight_ball(self, interaction: discord.Interaction, question: str):
-        # Handle missing question (shouldn't happen with required param, but just in case)
-        if question is None or question.strip() == "":
-            scold = "You dare seek wisdom without a question? Pathetic."
-            embed = embeds.system_embed(header="▒▒ ORACLE: 8-BALL ▒▒", description=f"A: {scold}")
-            await interaction.response.send_message(embed=embed)
-            return
-        # Determine intent with weighted probabilities: 10 yes, 10 no, 5 maybe, 5 ask-again
-        categories = (["yes"] * 10) + (["no"] * 10) + (["maybe"] * 5) + (["ask-again"] * 5)
-        intent = random.choice(categories)
-        answer = persona.generate_eight_ball(intent)
-        # Format the question and answer in the embed description
-        q_text = question.strip()
-        # Wrap question in quotes (choose quote style that avoids duplication of any internal quotes)
-        if '"' in q_text and "'" not in q_text:
-            q_display = f"'{q_text}'"
-        else:
-            q_display = f'"{q_text}"'
-        description = f"Q: {q_display}\nA: {answer}"
-        embed = embeds.system_embed(header="▒▒ ORACLE: 8-BALL ▒▒", description=description)
-        await interaction.response.send_message(embed=embed)
+    @app_commands.command(name="8ball", description="Ask Wilhelmina the eldritch 8-ball.")
+    @app_commands.describe(question="What do you seek?")
+    async def eightball(self, interaction: discord.Interaction, question: str):
+        r = random.random()
+        verdict: Literal["Affirmative", "Vague", "Negative"]
+        if r < 0.50: verdict = "Affirmative"
+        elif r < 0.75: verdict = "Vague"
+        else: verdict = "Negative"
 
-    # /fortune command: deliver a cursed fortune cookie line
-    @app_commands.command(name="fortune", description="Crack open a cursed fortune cookie from Wilhelmina.")
-    async def fortune(self, interaction: discord.Interaction):
-        fortune_text = persona.generate_fortune()
-        embed = embeds.system_embed(header="▒▒ FORTUNE ▒▒", description=fortune_text)
-        await interaction.response.send_message(embed=embed)
+        line = await self.engine.compose(
+            place="embed",
+            intent="8ball-line",
+            variables={"verdict": verdict, "question": question},
+            fallback={"Affirmative":"Yes—the current runs with you.",
+                      "Vague":"Clouded—the mirror will not settle.",
+                      "Negative":"No—the gate is shut."}[verdict]
+        )
+        body = f"**Question:** {question}\n**Answer:** {line}"
+        await interaction.response.send_message(embed=_haunted_embed("Witch’s 8-Ball", body))
 
+    @app_commands.command(name="misfortune-cookie", description="Crack a cursed cookie.")
+    async def misfortune_cookie(self, interaction: discord.Interaction):
+        line = await self.engine.compose(
+            place="embed",
+            intent="misfortune-cookie",
+            variables={},
+            fallback=random.choice([
+                "Beware the door that opens by itself.",
+                "Your shadow will learn a new name.",
+                "A promise you forgot did not forget you.",
+            ])
+        )
+        await interaction.response.send_message(embed=_haunted_embed("Misfortune Cookie", line))
 
-# Cog setup function (registers the cog if embeds-only mode is active)
 async def setup(bot: commands.Bot):
-    if getattr(settings, "EMBEDS_ONLY", True):
-        await bot.add_cog(Oracles(bot))
+    await bot.add_cog(Oracles(bot))
