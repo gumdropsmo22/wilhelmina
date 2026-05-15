@@ -125,6 +125,15 @@ def _get_bool(name: str, *, default: bool = False) -> bool:
     )
 
 
+def _get_bool_or_default(name: str, *, default: bool = False) -> bool:
+    """Read a boolean for compatibility globals without failing module import."""
+
+    try:
+        return _get_bool(name, default=default)
+    except SettingsError:
+        return default
+
+
 def _get_command_sync_mode() -> str:
     mode = (_get_str("COMMAND_SYNC_MODE", default="auto") or "auto").lower()
 
@@ -134,6 +143,15 @@ def _get_command_sync_mode() -> str:
         )
 
     return mode
+
+
+def _get_command_sync_mode_or_default() -> str:
+    """Read command sync mode for compatibility globals without failing module import."""
+
+    try:
+        return _get_command_sync_mode()
+    except SettingsError:
+        return "auto"
 
 
 def _read_enabled_cogs() -> Mapping[str, bool]:
@@ -199,11 +217,11 @@ APP_ENV = _get_str("APP_ENV", default="development") or "development"
 DEV_GUILD_ID = _get_str("DEV_GUILD_ID", default=None)
 DISCORD_TOKEN = _get_str("DISCORD_TOKEN", default=None)
 LOG_LEVEL = (_get_str("LOG_LEVEL", default="INFO") or "INFO").upper()
-COMMAND_SYNC_MODE = _get_str("COMMAND_SYNC_MODE", default="auto") or "auto"
+COMMAND_SYNC_MODE = _get_command_sync_mode_or_default()
 
-ENABLE_CORE = _get_bool("ENABLE_CORE", default=True)
-ENABLE_INVITE = _get_bool("ENABLE_INVITE", default=False)
-ENABLE_ORACLES = _get_bool("ENABLE_ORACLES", default=False)
+ENABLE_CORE = _get_bool_or_default("ENABLE_CORE", default=True)
+ENABLE_INVITE = _get_bool_or_default("ENABLE_INVITE", default=False)
+ENABLE_ORACLES = _get_bool_or_default("ENABLE_ORACLES", default=False)
 
 # Existing optional modules may look for this attribute.
-EMBEDS_ONLY = _get_bool("EMBEDS_ONLY", default=True)
+EMBEDS_ONLY = _get_bool_or_default("EMBEDS_ONLY", default=True)
