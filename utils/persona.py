@@ -1,17 +1,44 @@
-import random
 import logging
+import os
+import random
 from typing import List
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover - optional dependency guard
+    OpenAI = None
 
 
-_client = OpenAI()
+_client = None
+
+
+def _get_openai_client():
+    """Return a cached OpenAI client, or None when AI generation is unavailable."""
+
+    global _client
+
+    if OpenAI is None:
+        return None
+
+    if not os.getenv("OPENAI_API_KEY"):
+        return None
+
+    if _client is not None:
+        return _client
+
+    try:
+        _client = OpenAI()
+    except Exception as exc:  # pragma: no cover - best effort logging
+        logging.exception("OpenAI client initialization failed: %s", exc)
+        return None
+
+    return _client
 
 
 # Cryptic lore lines for numbers (used in /roll)
 def number_lore(n: int) -> str:
     """Return a cryptic, poetic line keyed to the number n, in Wilhelmina's tone."""
-    # Special-case notable numbers with custom lore
+
     special_cases = {
         1: "The loneliest number—divisible by none.",
         3: "Third time's the harm; chaos thrives.",
@@ -26,24 +53,32 @@ def number_lore(n: int) -> str:
         100: "A perfect hundred—too neat to trust.",
         1000: "A thousand souls cry out at once.",
     }
+
     if n in special_cases:
         return special_cases[n]
-    # Determine number properties
+
     is_prime = False
     if n > 1:
         is_prime = all(n % i != 0 for i in range(2, int(n**0.5) + 1))
+
     if is_prime:
         return "Prime and indivisible—alone in the void."
-    if n % 2 == 0:  # even (non-prime composite evens)
+
+    if n % 2 == 0:
         return "Even and dull—symmetry bores me."
-    else:  # odd (non-prime composite odds)
-        return "Odd and unruly—just my style."
+
+    return "Odd and unruly—just my style."
 
 
 def generate_openai_response(prompt: str) -> str:
     """Send prompt to OpenAI and return a trimmed response, or empty string on failure."""
+
+    client = _get_openai_client()
+    if client is None:
+        return ""
+
     try:
-        resp = _client.responses.create(model="gpt-4o-mini", input=prompt)
+        resp = client.responses.create(model="gpt-4o-mini", input=prompt)
         text = resp.output_text.strip()
         return text.replace("\n", " ")
     except Exception as exc:  # pragma: no cover - best effort logging
@@ -62,17 +97,20 @@ _eight_ball_cache: List[str] = []
 
 def generate_eight_ball(intent: str) -> str:
     """Generate one Magic 8-Ball line via OpenAI, falling back to static lines on failure."""
+
     intent = intent.lower()
     prompt = (
         "You are Wilhelmina, a mystical digital witch.\n"
         f"Respond to a Magic 8-Ball question with a one-sentence answer that implies the outcome is: {intent.upper()}.\n"
         "Keep it eerie, sarcastic, or dramatic. Never repeat previous answers."
     )
+
     for _ in range(3):
         line = generate_openai_response(prompt)
         if line and line not in _eight_ball_cache:
             _cache_response(_eight_ball_cache, line)
             return line
+
     fallbacks = {
         "yes": [
             "The cauldron bubbles yes.",
@@ -93,6 +131,7 @@ def generate_eight_ball(intent: str) -> str:
             "Bring a sacrifice and ask again.",
         ],
     }
+
     choice = random.choice(fallbacks.get(intent, ["The void stays silent."]))
     _cache_response(_eight_ball_cache, choice)
     return choice
@@ -103,22 +142,25 @@ _fortune_cache: List[str] = []
 
 def generate_fortune() -> str:
     """Generate a single fortune line via OpenAI with fallback to static phrases."""
+
     prompt = (
         "Write a single eerie fortune in the voice of Wilhelmina, a sarcastic digital witch.\n"
         "The fortune should be dark, poetic, strange, and no longer than one sentence.\n"
         "Never reuse past phrasing. Avoid clichés."
     )
+
     for _ in range(3):
         line = generate_openai_response(prompt)
         if line and line not in _fortune_cache:
             _cache_response(_fortune_cache, line)
             return line
+
     fallbacks = [
         "Your future: cloudy with a chance of regret.",
         "At midnight, something lost returns with teeth.",
         "Beware the full moon; it likes you too much.",
     ]
+
     choice = random.choice(fallbacks)
     _cache_response(_fortune_cache, choice)
     return choice
-
