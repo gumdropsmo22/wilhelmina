@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wilhelmina"
+version = "0.1.0"
+description = "Wilhelmina Discord bot runtime"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "discord.py>=2.5,<3.0",
+  "python-dotenv>=1.0,<2.0",
+]
+
+[project.optional-dependencies]
+oracles = [
+  "openai>=1.0,<2.0",
+]
+dev = [
+  "pytest>=8.0,<10.0",
+  "pytest-asyncio>=0.24,<2.0",
+  "ruff>=0.8,<1.0",
+]
+
+[project.scripts]
+wilhelmina = "bot:main"
+
+[tool.setuptools]
+py-modules = ["bot"]
+packages = ["cogs", "config", "utils"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
+ignore = []
+
+[tool.ruff.format]
+docstring-code-format = true
