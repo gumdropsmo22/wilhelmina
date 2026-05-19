@@ -19,8 +19,11 @@ class DummyBot:
 def make_settings(enabled):
     flags = (
         CogFlag("cogs.core", "ENABLE_CORE", True, "core", True),
+        CogFlag("cogs.admin", "ENABLE_ADMIN", True, "admin", True),
         CogFlag("cogs.invite", "ENABLE_INVITE", False, "invite", False),
-        CogFlag("cogs.oracles", "ENABLE_ORACLES", False, "oracles", False),
+        CogFlag("cogs.roll", "ENABLE_ROLL", False, "roll", False),
+        CogFlag("cogs.eight_ball", "ENABLE_EIGHT_BALL", False, "eight ball", False),
+        CogFlag("cogs.fortune", "ENABLE_FORTUNE", False, "fortune", False),
     )
 
     return SimpleNamespace(
@@ -35,43 +38,48 @@ class CogLoaderTests(unittest.IsolatedAsyncioTestCase):
         runtime_settings = make_settings(
             {
                 "cogs.core": True,
-                "cogs.invite": True,
-                "cogs.oracles": False,
+                "cogs.admin": True,
+                "cogs.invite": False,
+                "cogs.roll": True,
+                "cogs.eight_ball": False,
+                "cogs.fortune": True,
             }
         )
 
         with self.assertLogs("wilhelmina", level="INFO") as logs:
             report = await bot_module.load_cogs(dummy, runtime_settings)
 
-        self.assertEqual(dummy.loaded, ["cogs.core", "cogs.invite"])
-        self.assertEqual(report["loaded"], ["cogs.core", "cogs.invite"])
-        self.assertEqual(report["skipped"], ["cogs.oracles"])
-        self.assertIn("cog_skipped extension=cogs.oracles", "\n".join(logs.output))
+        self.assertEqual(dummy.loaded, ["cogs.core", "cogs.admin", "cogs.roll", "cogs.fortune"])
+        self.assertEqual(report["loaded"], ["cogs.core", "cogs.admin", "cogs.roll", "cogs.fortune"])
+        self.assertEqual(report["skipped"], ["cogs.invite", "cogs.eight_ball"])
+        self.assertIn("cog_skipped extension=cogs.eight_ball", "\n".join(logs.output))
 
     async def test_optional_failed_cog_logs_and_loading_continues(self):
-        dummy = DummyBot(fail_on={"cogs.invite"})
+        dummy = DummyBot(fail_on={"cogs.eight_ball"})
         runtime_settings = make_settings(
             {
                 "cogs.core": True,
-                "cogs.invite": True,
-                "cogs.oracles": True,
+                "cogs.admin": True,
+                "cogs.roll": True,
+                "cogs.eight_ball": True,
+                "cogs.fortune": True,
             }
         )
 
         with self.assertLogs("wilhelmina", level="INFO") as logs:
             report = await bot_module.load_cogs(dummy, runtime_settings)
 
-        self.assertEqual(dummy.loaded, ["cogs.core", "cogs.oracles"])
-        self.assertEqual(report["failed"], ["cogs.invite"])
-        self.assertIn("cog_load_failed_unexpected extension=cogs.invite", "\n".join(logs.output))
+        self.assertEqual(dummy.loaded, ["cogs.core", "cogs.admin", "cogs.roll", "cogs.fortune"])
+        self.assertEqual(report["failed"], ["cogs.eight_ball"])
+        self.assertIn("cog_load_failed_unexpected extension=cogs.eight_ball", "\n".join(logs.output))
 
     async def test_required_failed_cog_raises(self):
-        dummy = DummyBot(fail_on={"cogs.core"})
+        dummy = DummyBot(fail_on={"cogs.admin"})
         runtime_settings = make_settings(
             {
                 "cogs.core": True,
-                "cogs.invite": True,
-                "cogs.oracles": True,
+                "cogs.admin": True,
+                "cogs.roll": True,
             }
         )
 
