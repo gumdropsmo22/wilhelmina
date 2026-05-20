@@ -16,7 +16,7 @@ Current cogs:
 
 ```txt
 cogs.core          /about, /uptime
-cogs.admin         /admin diagnostics, /admin features, /admin sync
+cogs.admin         /admin diagnostics, /admin features, /admin sync, /admin config ...
 cogs.invite        /invite
 cogs.roll          /roll
 cogs.eight_ball    /8ball
@@ -90,11 +90,47 @@ CLIENT_ID=
 SERVER_MODE=dedicated
 HOME_GUILD_ID=
 COMMAND_SYNC_MODE=guild
+DATABASE_PATH=data/wilhelmina.sqlite3
 ENABLE_CORE=true
 ENABLE_ADMIN=true
 ```
 
 `DEV_GUILD_ID` is accepted as a legacy alias for `HOME_GUILD_ID`, but new setups should use `HOME_GUILD_ID`.
+
+## SQLite persistence
+
+Wilhelmina stores dedicated-server configuration and administrative audit events in SQLite.
+
+```env
+DATABASE_PATH=data/wilhelmina.sqlite3
+```
+
+Relative paths resolve from the repository root. The SQLite file is local runtime state and should be backed up before deployment moves, schema changes, or manual database edits.
+
+Phase 2 persistence stores:
+
+```txt
+guild_config
+audit_log
+schema_migrations
+```
+
+The stored guild configuration is the source of truth for server role/channel IDs after Phase 2. Environment variables for role/channel IDs are not used by the new config layer.
+
+## Admin config commands
+
+The `/admin config` commands are administrator-only and always respond ephemerally.
+
+```txt
+/admin config view
+/admin config set-role
+/admin config set-channel
+/admin config set-timezone
+/admin config validate
+/admin config clear
+```
+
+These commands only store, clear, validate, and audit configuration. They do **not** create roles, create channels, assign roles, onboard users, mutate permissions, schedule jobs, or transform a server.
 
 ## AI-backed features
 
