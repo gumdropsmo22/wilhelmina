@@ -6,6 +6,7 @@ Requires-Python: <3.13,>=3.11
 Description-Content-Type: text/markdown
 Requires-Dist: discord.py<3.0,>=2.5
 Requires-Dist: python-dotenv<2.0,>=1.0
+Requires-Dist: tzdata>=2026.2; sys_platform == "win32"
 Provides-Extra: ai
 Requires-Dist: openai<2.0,>=1.0; extra == "ai"
 Provides-Extra: dev
