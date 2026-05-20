@@ -1,39 +1,45 @@
-import os, time, platform
+from __future__ import annotations
+
+import platform
+import time
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+
+def _format_uptime(seconds: int) -> str:
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours}h {minutes}m {seconds}s"
+
+
 class Core(commands.Cog):
+    """Core user-facing runtime commands."""
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.start = time.time()
 
-    @app_commands.command(name="about", description="About this bot")
-    async def about(self, interaction: discord.Interaction):
-        msg = (f"**Wilhelmina** skeleton is alive. "
-               f"Python {platform.python_version()} • discord.py {discord.__version__} "
-               f"• env={os.getenv('APP_ENV','development')}")
-        await interaction.response.send_message(msg, ephemeral=True)
+    @app_commands.command(name="about", description="About Wilhelmina.")
+    async def about(self, interaction: discord.Interaction) -> None:
+        settings = getattr(self.bot, "settings", None)
+        app_env = getattr(settings, "app_env", "unknown")
+        server_mode = getattr(settings, "server_mode", "dedicated")
+        sync_mode = getattr(settings, "command_sync_mode", "unknown")
 
-    @app_commands.command(name="uptime", description="Show bot uptime")
-    async def uptime(self, interaction: discord.Interaction):
-        s = int(time.time() - self.start)
-        h, r = divmod(s, 3600); m, s = divmod(r, 60)
-        await interaction.response.send_message(f"Uptime: {h}h {m}m {s}s", ephemeral=True)
+        message = (
+            "**Wilhelmina** runtime is online.\n"
+            f"Python `{platform.python_version()}` • discord.py `{discord.__version__}`\n"
+            f"Environment `{app_env}` • server mode `{server_mode}` • sync `{sync_mode}`"
+        )
+        await interaction.response.send_message(message, ephemeral=True)
 
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.command(name="sync", description="Admin: resync slash commands")
-    async def sync(self, interaction: discord.Interaction):
-        dev = os.getenv("APP_ENV","development") == "development"
-        gid = os.getenv("DEV_GUILD_ID")
-        if dev and gid:
-            guild = discord.Object(id=int(gid))
-            self.bot.tree.copy_global_to(guild=guild)
-            synced = await self.bot.tree.sync(guild=guild)
-            await interaction.response.send_message(f"Synced {len(synced)} cmds to dev guild.", ephemeral=True)
-        else:
-            synced = await self.bot.tree.sync()
-            await interaction.response.send_message(f"Synced {len(synced)} cmds globally.", ephemeral=True)
+    @app_commands.command(name="uptime", description="Show bot uptime.")
+    async def uptime(self, interaction: discord.Interaction) -> None:
+        started = getattr(self.bot, "start_ts", time.time())
+        seconds = int(time.time() - started)
+        await interaction.response.send_message(f"Uptime: {_format_uptime(seconds)}", ephemeral=True)
 
-async def setup(bot: commands.Bot):
+
+async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Core(bot))
