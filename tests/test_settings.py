@@ -38,6 +38,21 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(loaded.server_mode, "dedicated")
         self.assertEqual(loaded.home_guild_id, 12345)
         self.assertEqual(loaded.command_sync_mode, "guild")
+        self.assertEqual(loaded.database_path, settings_module.DEFAULT_DATABASE_PATH)
+
+    def test_database_path_resolves_relative_to_project_root(self):
+        loaded = self.load_with_env(
+            {
+                "DISCORD_TOKEN": "token",
+                "COMMAND_SYNC_MODE": "off",
+                "DATABASE_PATH": "var/wilhelmina.sqlite3",
+            }
+        )
+
+        self.assertEqual(
+            loaded.database_path,
+            settings_module.PROJECT_ROOT / "var" / "wilhelmina.sqlite3",
+        )
 
     def test_legacy_dev_guild_id_alias_sets_home_guild(self):
         loaded = self.load_with_env(

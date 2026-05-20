@@ -15,6 +15,7 @@ TRUE_VALUES = {"1", "true", "t", "yes", "y", "on"}
 FALSE_VALUES = {"0", "false", "f", "no", "n", "off"}
 VALID_COMMAND_SYNC_MODES = {"guild", "dev", "global", "off", "auto"}
 VALID_SERVER_MODES = {"dedicated"}
+DEFAULT_DATABASE_PATH = PROJECT_ROOT / "data" / "wilhelmina.sqlite3"
 
 
 class SettingsError(RuntimeError):
@@ -41,6 +42,7 @@ class RuntimeSettings:
     app_env: str
     server_mode: str
     home_guild_id: int | None
+    database_path: Path
     log_level: str
     command_sync_mode: str
     cog_flags: tuple[CogFlag, ...]
@@ -165,6 +167,29 @@ def _get_home_guild_id() -> int | None:
     return _get_int("DEV_GUILD_ID", default=None)
 
 
+def _get_database_path() -> Path:
+    """Return the SQLite database path, resolving relative paths from the project root."""
+
+    raw = _get_str("DATABASE_PATH", default=str(DEFAULT_DATABASE_PATH))
+    if raw is None or not raw.strip():
+        return DEFAULT_DATABASE_PATH
+
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+
+    return path
+
+
+def _get_database_path_or_default() -> Path:
+    """Read DATABASE_PATH for compatibility globals without failing module import."""
+
+    try:
+        return _get_database_path()
+    except (OSError, RuntimeError, ValueError):
+        return DEFAULT_DATABASE_PATH
+
+
 def _get_command_sync_mode() -> str:
     mode = (_get_str("COMMAND_SYNC_MODE", default="guild") or "guild").lower()
 
@@ -193,7 +218,8 @@ def _get_server_mode() -> str:
 
     if mode not in VALID_SERVER_MODES:
         raise SettingsError(
-            "SERVER_MODE must be 'dedicated'. Server takeover/transformation modes are not supported."
+            "SERVER_MODE must be 'dedicated'. "
+            "Server takeover/transformation modes are not supported."
         )
 
     return mode
@@ -236,6 +262,7 @@ def load_settings() -> RuntimeSettings:
     app_env = _get_str("APP_ENV", default="development") or "development"
     server_mode = _get_server_mode()
     home_guild_id = _get_home_guild_id()
+    database_path = _get_database_path()
     log_level = (_get_str("LOG_LEVEL", default="INFO") or "INFO").upper()
     command_sync_mode = _get_command_sync_mode()
 
@@ -251,6 +278,7 @@ def load_settings() -> RuntimeSettings:
         app_env=app_env,
         server_mode=server_mode,
         home_guild_id=home_guild_id,
+        database_path=database_path,
         log_level=log_level,
         command_sync_mode=command_sync_mode,
         cog_flags=COG_FLAGS,
@@ -278,6 +306,7 @@ HOME_GUILD_ID = _get_str("HOME_GUILD_ID", default=_get_str("DEV_GUILD_ID", defau
 DEV_GUILD_ID = HOME_GUILD_ID
 CLIENT_ID = _get_str("CLIENT_ID", default=None)
 DISCORD_TOKEN = _get_str("DISCORD_TOKEN", default=None)
+DATABASE_PATH = str(_get_database_path_or_default())
 LOG_LEVEL = (_get_str("LOG_LEVEL", default="INFO") or "INFO").upper()
 COMMAND_SYNC_MODE = _get_command_sync_mode_or_default()
 
