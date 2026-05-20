@@ -46,11 +46,11 @@ def make_admin(*, home_guild_id=123, database_path=":memory:"):
     return Admin(bot)
 
 
-def test_admin_group_has_default_admin_permissions():
-    group = Admin.__cog_app_commands_group__
-    permissions = group.default_permissions
-    assert permissions is not None
-    assert permissions.administrator is True
+def test_admin_group_declares_admin_permissions_at_class_level():
+    source = (Path("cogs") / "admin.py").read_text(encoding="utf-8")
+
+    assert "@app_commands.guild_only()\n@app_commands.default_permissions(administrator=True)\nclass Admin" in source
+    assert source.count("@app_commands.default_permissions(administrator=True)") == 1
 
 
 @pytest.mark.asyncio

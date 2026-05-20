@@ -1,5 +1,0 @@
-bot
-cogs
-config
-services
-utils
