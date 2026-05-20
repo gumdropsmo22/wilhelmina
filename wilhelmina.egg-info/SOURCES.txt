@@ -18,6 +18,7 @@ services/eight_ball.py
 services/fortune.py
 services/guild_config.py
 services/rolls.py
+tests/test_admin.py
 tests/test_audit_log.py
 tests/test_bot_loader.py
 tests/test_database.py

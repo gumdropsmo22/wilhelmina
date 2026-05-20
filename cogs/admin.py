@@ -70,6 +70,8 @@ def _format_config(config: guild_config.GuildConfig | None) -> str:
     return "\n".join(lines)
 
 
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
 class Admin(commands.GroupCog, group_name="admin"):
     """Admin-only diagnostics, runtime controls, and guild configuration."""
 
@@ -96,23 +98,28 @@ class Admin(commands.GroupCog, group_name="admin"):
         home_guild_id = getattr(settings, "home_guild_id", None)
         interaction_guild_id = interaction.guild_id
 
-        if home_guild_id is not None and interaction_guild_id is not None:
-            if int(interaction_guild_id) != int(home_guild_id):
-                await interaction.response.send_message(
-                    "This command only runs in Wilhelmina's configured home guild.",
-                    ephemeral=True,
-                )
-                return None
-
-        guild_id = interaction_guild_id or home_guild_id
-        if guild_id is None:
+        if home_guild_id is None:
             await interaction.response.send_message(
-                "Cannot resolve a guild. Set `HOME_GUILD_ID` and run this inside the server.",
+                "Cannot resolve a guild. Set `HOME_GUILD_ID` before using admin config commands.",
                 ephemeral=True,
             )
             return None
 
-        return int(guild_id)
+        if interaction_guild_id is None:
+            await interaction.response.send_message(
+                "Run this command inside Wilhelmina's configured home guild.",
+                ephemeral=True,
+            )
+            return None
+
+        if int(interaction_guild_id) != int(home_guild_id):
+            await interaction.response.send_message(
+                "This command only runs in Wilhelmina's configured home guild.",
+                ephemeral=True,
+            )
+            return None
+
+        return int(home_guild_id)
 
     async def _send_config_error(
         self,
@@ -142,7 +149,6 @@ class Admin(commands.GroupCog, group_name="admin"):
             after=guild_config.config_to_audit_dict(after),
         )
 
-    @app_commands.default_permissions(administrator=True)
     @app_commands.command(name="diagnostics", description="Show Wilhelmina runtime diagnostics.")
     async def diagnostics(self, interaction: discord.Interaction) -> None:
         if await self._reject_non_admin(interaction):
@@ -172,7 +178,6 @@ class Admin(commands.GroupCog, group_name="admin"):
         )
         await interaction.response.send_message(message, ephemeral=True)
 
-    @app_commands.default_permissions(administrator=True)
     @app_commands.command(
         name="features",
         description="Show enabled and disabled Wilhelmina features.",
@@ -190,7 +195,6 @@ class Admin(commands.GroupCog, group_name="admin"):
         lines.append("```")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-    @app_commands.default_permissions(administrator=True)
     @app_commands.command(name="sync", description="Resync Wilhelmina slash commands.")
     async def sync(self, interaction: discord.Interaction) -> None:
         if await self._reject_non_admin(interaction):
@@ -233,7 +237,6 @@ class Admin(commands.GroupCog, group_name="admin"):
         )
 
     @config.command(name="view", description="View Wilhelmina's stored guild configuration.")
-    @app_commands.default_permissions(administrator=True)
     async def config_view(self, interaction: discord.Interaction) -> None:
         if await self._reject_non_admin(interaction):
             return
@@ -253,7 +256,6 @@ class Admin(commands.GroupCog, group_name="admin"):
         )
 
     @config.command(name="set-role", description="Store one configured guild role.")
-    @app_commands.default_permissions(administrator=True)
     @app_commands.describe(
         field="Role config field to update.",
         role="Existing Discord role to store.",
@@ -296,7 +298,6 @@ class Admin(commands.GroupCog, group_name="admin"):
         )
 
     @config.command(name="set-channel", description="Store one configured guild text channel.")
-    @app_commands.default_permissions(administrator=True)
     @app_commands.describe(
         field="Channel config field to update.",
         channel="Existing Discord text channel to store.",
@@ -339,7 +340,6 @@ class Admin(commands.GroupCog, group_name="admin"):
         )
 
     @config.command(name="set-timezone", description="Store the guild IANA timezone.")
-    @app_commands.default_permissions(administrator=True)
     @app_commands.describe(timezone="IANA timezone name, such as UTC or Asia/Riyadh.")
     async def config_set_timezone(
         self,
@@ -377,7 +377,6 @@ class Admin(commands.GroupCog, group_name="admin"):
         )
 
     @config.command(name="validate", description="Validate stored guild roles and channels.")
-    @app_commands.default_permissions(administrator=True)
     async def config_validate(self, interaction: discord.Interaction) -> None:
         if await self._reject_non_admin(interaction):
             return
@@ -419,7 +418,6 @@ class Admin(commands.GroupCog, group_name="admin"):
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @config.command(name="clear", description="Clear stored guild config or one selected field.")
-    @app_commands.default_permissions(administrator=True)
     @app_commands.describe(
         field="Optional field to clear. Leave empty to delete the full config row.",
     )
