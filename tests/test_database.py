@@ -24,6 +24,7 @@ def test_initialize_database_is_idempotent(tmp_path):
         assert "schema_migrations" in tables
         assert "guild_config" in tables
         assert "audit_log" in tables
+        assert "onboarding_state" in tables
         assert fetch_schema_versions(connection) == [CURRENT_SCHEMA_VERSION]
     finally:
         connection.close()
