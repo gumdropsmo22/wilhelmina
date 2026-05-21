@@ -8,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from services import audit_log, config_validation, guild_config
+from services import onboarding as onboarding_service
 from services.database import initialize_database, managed_connection
 
 ROLE_FIELD_CHOICES = [
@@ -23,6 +24,12 @@ CHANNEL_FIELD_CHOICES = [
 ]
 CLEAR_FIELD_CHOICES = ROLE_FIELD_CHOICES + CHANNEL_FIELD_CHOICES + [
     app_commands.Choice(name="timezone", value="timezone"),
+]
+ONBOARDING_STATE_CHOICES = [
+    app_commands.Choice(name="pending", value="pending"),
+    app_commands.Choice(name="approved", value="approved"),
+    app_commands.Choice(name="rejected", value="rejected"),
+    app_commands.Choice(name="completed", value="completed"),
 ]
 
 ROLE_FIELD_ORDER = ("admin_role_id", "member_role_id", "pending_role_id")
@@ -96,6 +103,46 @@ def _format_audit_event(event: audit_log.AuditEvent) -> str:
     )
 
 
+def _format_onboarding_record(record: onboarding_service.OnboardingRecord | None) -> str:
+    if record is None:
+        return "No onboarding record exists for that user."
+
+    lines = [
+        "```txt",
+        f"guild_id     = {record.guild_id}",
+        f"user_id      = {record.user_id}",
+        f"state        = {record.state}",
+        f"started_at   = {record.started_at}",
+        f"completed_at = {_format_config_value(record.completed_at)}",
+        f"approved_by  = {_format_config_value(record.approved_by)}",
+        f"rejected_by  = {_format_config_value(record.rejected_by)}",
+        f"notes        = {_format_config_value(record.notes)}",
+        f"created_at   = {record.created_at}",
+        f"updated_at   = {record.updated_at}",
+        "```",
+    ]
+    return "\n".join(lines)
+
+
+def _format_onboarding_rows(records: list[onboarding_service.OnboardingRecord]) -> str:
+    if not records:
+        return "No onboarding records found."
+
+    lines = ["```txt"]
+    for record in records:
+        notes = f" notes={record.notes}" if record.notes else ""
+        lines.append(
+            f"user={record.user_id} state={record.state} "
+            f"updated={record.updated_at}{notes}"
+        )
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def _format_user_label(user: discord.User | discord.Member) -> str:
+    return getattr(user, "mention", f"`{user.id}`")
+
+
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
 class Admin(commands.GroupCog, group_name="admin"):
@@ -112,6 +159,10 @@ class Admin(commands.GroupCog, group_name="admin"):
     logs = app_commands.Group(
         name="logs",
         description="Inspect Wilhelmina's administrative audit log.",
+    )
+    onboarding = app_commands.Group(
+        name="onboarding",
+        description="Inspect and manually update onboarding state.",
     )
 
     def __init__(self, bot: commands.Bot):
@@ -170,6 +221,13 @@ class Admin(commands.GroupCog, group_name="admin"):
         error: Exception,
     ) -> None:
         await interaction.response.send_message(f"Config error: {error}", ephemeral=True)
+
+    async def _send_onboarding_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+    ) -> None:
+        await interaction.response.send_message(f"Onboarding error: {error}", ephemeral=True)
 
     def _record_config_audit(
         self,
@@ -373,6 +431,230 @@ class Admin(commands.GroupCog, group_name="admin"):
         lines.extend(_format_audit_event(event) for event in events)
         lines.append("```")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @onboarding.command(name="view", description="View one user's onboarding state.")
+    @app_commands.describe(user="User to inspect.")
+    async def onboarding_view(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+    ) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        database_path = self._database_path()
+        initialize_database(database_path)
+        with managed_connection(database_path) as connection:
+            record = onboarding_service.get_onboarding_record(connection, guild_id, user.id)
+
+        await interaction.response.send_message(
+            f"**Onboarding state for {_format_user_label(user)}**\n{_format_onboarding_record(record)}",
+            ephemeral=True,
+        )
+
+    @onboarding.command(name="list", description="List recent onboarding records.")
+    @app_commands.describe(
+        state="Optional state filter.",
+        limit="Number of rows to show. Range: 1-25.",
+    )
+    @app_commands.choices(state=ONBOARDING_STATE_CHOICES)
+    async def onboarding_list(
+        self,
+        interaction: discord.Interaction,
+        state: str | None = None,
+        limit: app_commands.Range[int, 1, 25] = 10,
+    ) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        database_path = self._database_path()
+        initialize_database(database_path)
+        try:
+            with managed_connection(database_path) as connection:
+                records = onboarding_service.list_onboarding_records(
+                    connection,
+                    guild_id,
+                    state=state,
+                    limit=limit,
+                )
+        except onboarding_service.OnboardingError as exc:
+            await self._send_onboarding_error(interaction, exc)
+            return
+
+        label = f" state={state}" if state else ""
+        await interaction.response.send_message(
+            f"**Recent onboarding records{label}**\n{_format_onboarding_rows(records)}",
+            ephemeral=True,
+        )
+
+    @onboarding.command(name="start", description="Start or reset onboarding for one user.")
+    @app_commands.describe(user="User to start onboarding for.", notes="Optional admin notes.")
+    async def onboarding_start(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+        notes: str | None = None,
+    ) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        database_path = self._database_path()
+        initialize_database(database_path)
+        try:
+            with managed_connection(database_path) as connection:
+                _, after = onboarding_service.start_onboarding(
+                    connection,
+                    guild_id,
+                    user.id,
+                    actor_user_id=interaction.user.id,
+                    notes=notes,
+                )
+        except onboarding_service.OnboardingError as exc:
+            await self._send_onboarding_error(interaction, exc)
+            return
+
+        await interaction.response.send_message(
+            f"Started onboarding for {_format_user_label(user)} as `{after.state}`.",
+            ephemeral=True,
+        )
+
+    @onboarding.command(name="approve", description="Approve one user's onboarding state.")
+    @app_commands.describe(user="User to approve.", notes="Optional admin notes.")
+    async def onboarding_approve(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+        notes: str | None = None,
+    ) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        database_path = self._database_path()
+        initialize_database(database_path)
+        try:
+            with managed_connection(database_path) as connection:
+                _, after = onboarding_service.approve_onboarding(
+                    connection,
+                    guild_id,
+                    user.id,
+                    actor_user_id=interaction.user.id,
+                    notes=notes,
+                )
+        except onboarding_service.OnboardingError as exc:
+            await self._send_onboarding_error(interaction, exc)
+            return
+
+        await interaction.response.send_message(
+            f"Approved onboarding for {_format_user_label(user)} as `{after.state}`.",
+            ephemeral=True,
+        )
+
+    @onboarding.command(name="reject", description="Reject one user's onboarding state.")
+    @app_commands.describe(user="User to reject.", notes="Optional admin notes.")
+    async def onboarding_reject(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+        notes: str | None = None,
+    ) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        database_path = self._database_path()
+        initialize_database(database_path)
+        try:
+            with managed_connection(database_path) as connection:
+                _, after = onboarding_service.reject_onboarding(
+                    connection,
+                    guild_id,
+                    user.id,
+                    actor_user_id=interaction.user.id,
+                    notes=notes,
+                )
+        except onboarding_service.OnboardingError as exc:
+            await self._send_onboarding_error(interaction, exc)
+            return
+
+        await interaction.response.send_message(
+            f"Rejected onboarding for {_format_user_label(user)} as `{after.state}`.",
+            ephemeral=True,
+        )
+
+    @onboarding.command(name="complete", description="Complete one approved onboarding state.")
+    @app_commands.describe(user="User to complete.", notes="Optional admin notes.")
+    async def onboarding_complete(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+        notes: str | None = None,
+    ) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        database_path = self._database_path()
+        initialize_database(database_path)
+        try:
+            with managed_connection(database_path) as connection:
+                _, after = onboarding_service.complete_onboarding(
+                    connection,
+                    guild_id,
+                    user.id,
+                    actor_user_id=interaction.user.id,
+                    notes=notes,
+                )
+        except onboarding_service.OnboardingError as exc:
+            await self._send_onboarding_error(interaction, exc)
+            return
+
+        await interaction.response.send_message(
+            f"Completed onboarding for {_format_user_label(user)} as `{after.state}`.",
+            ephemeral=True,
+        )
+
+    @onboarding.command(name="override", description="Force-set one user's onboarding state.")
+    @app_commands.describe(
+        user="User to update.",
+        state="State to force-set.",
+        notes="Optional admin notes.",
+    )
+    @app_commands.choices(state=ONBOARDING_STATE_CHOICES)
+    async def onboarding_override(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+        state: str,
+        notes: str | None = None,
+    ) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        database_path = self._database_path()
+        initialize_database(database_path)
+        try:
+            with managed_connection(database_path) as connection:
+                _, after = onboarding_service.override_state(
+                    connection,
+                    guild_id,
+                    user.id,
+                    state=state,
+                    actor_user_id=interaction.user.id,
+                    notes=notes,
+                )
+        except onboarding_service.OnboardingError as exc:
+            await self._send_onboarding_error(interaction, exc)
+            return
+
+        await interaction.response.send_message(
+            f"Overrode onboarding for {_format_user_label(user)} as `{after.state}`.",
+            ephemeral=True,
+        )
 
     @config.command(name="view", description="View Wilhelmina's stored guild configuration.")
     async def config_view(self, interaction: discord.Interaction) -> None:
