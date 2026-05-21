@@ -7,7 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from services import audit_log, guild_config
+from services import audit_log, config_validation, guild_config
 from services.database import initialize_database, managed_connection
 
 ROLE_FIELD_CHOICES = [
@@ -70,6 +70,32 @@ def _format_config(config: guild_config.GuildConfig | None) -> str:
     return "\n".join(lines)
 
 
+def _format_readiness_block(
+    title: str,
+    result: config_validation.ConfigValidationResult,
+    *,
+    checklist: bool = False,
+) -> str:
+    lines = [f"**{title}**", "```txt"]
+    if checklist:
+        lines.extend(config_validation.format_checklist_lines(result))
+    else:
+        lines.append(f"overall_ok = {str(result.ok).lower()}")
+        lines.append(f"errors     = {len(result.errors)}")
+        lines.append(f"warnings   = {len(result.warnings)}")
+        lines.append("")
+        lines.extend(config_validation.format_check_lines(result))
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def _format_audit_event(event: audit_log.AuditEvent) -> str:
+    return (
+        f"#{event.id} {event.created_at} "
+        f"actor={event.actor_user_id} action={event.action} target={event.target}"
+    )
+
+
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
 class Admin(commands.GroupCog, group_name="admin"):
@@ -78,6 +104,14 @@ class Admin(commands.GroupCog, group_name="admin"):
     config = app_commands.Group(
         name="config",
         description="Manage Wilhelmina's stored guild configuration.",
+    )
+    setup = app_commands.Group(
+        name="setup",
+        description="Inspect Wilhelmina's operational readiness.",
+    )
+    logs = app_commands.Group(
+        name="logs",
+        description="Inspect Wilhelmina's administrative audit log.",
     )
 
     def __init__(self, bot: commands.Bot):
@@ -100,7 +134,7 @@ class Admin(commands.GroupCog, group_name="admin"):
 
         if home_guild_id is None:
             await interaction.response.send_message(
-                "Cannot resolve a guild. Set `HOME_GUILD_ID` before using admin config commands.",
+                "Cannot resolve a guild. Set `HOME_GUILD_ID` before using admin commands.",
                 ephemeral=True,
             )
             return None
@@ -120,6 +154,15 @@ class Admin(commands.GroupCog, group_name="admin"):
             return None
 
         return int(home_guild_id)
+
+    async def _guard_admin_home_guild(
+        self,
+        interaction: discord.Interaction,
+    ) -> int | None:
+        if await self._reject_non_admin(interaction):
+            return None
+
+        return await self._resolve_guild_id(interaction)
 
     async def _send_config_error(
         self,
@@ -149,9 +192,31 @@ class Admin(commands.GroupCog, group_name="admin"):
             after=guild_config.config_to_audit_dict(after),
         )
 
+    def _load_config(self, guild_id: int) -> guild_config.GuildConfig | None:
+        database_path = self._database_path()
+        initialize_database(database_path)
+        with managed_connection(database_path) as connection:
+            return guild_config.get_guild_config(connection, guild_id)
+
+    def _build_readiness_result(
+        self,
+        interaction: discord.Interaction,
+        guild_id: int,
+    ) -> config_validation.ConfigValidationResult:
+        config = self._load_config(guild_id)
+        bot_user = getattr(self.bot, "user", None)
+        bot_user_id = getattr(bot_user, "id", None)
+        return config_validation.validate_config(
+            config=config,
+            guild=interaction.guild,
+            configured_home_guild_id=guild_id,
+            bot_user_id=bot_user_id,
+        )
+
     @app_commands.command(name="diagnostics", description="Show Wilhelmina runtime diagnostics.")
     async def diagnostics(self, interaction: discord.Interaction) -> None:
-        if await self._reject_non_admin(interaction):
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
             return
 
         settings = self.bot.settings
@@ -168,7 +233,7 @@ class Admin(commands.GroupCog, group_name="admin"):
             f"app_env        = {settings.app_env}\n"
             f"server_mode    = {settings.server_mode}\n"
             f"sync_mode      = {settings.command_sync_mode}\n"
-            f"home_guild_id  = {settings.home_guild_id or 'unset'}\n"
+            f"home_guild_id  = {guild_id}\n"
             f"database_path  = {settings.database_path}\n"
             f"uptime         = {_format_uptime(uptime_seconds)}\n"
             f"loaded_cogs    = {_format_sequence(report.get('loaded', []))}\n"
@@ -183,11 +248,12 @@ class Admin(commands.GroupCog, group_name="admin"):
         description="Show enabled and disabled Wilhelmina features.",
     )
     async def features(self, interaction: discord.Interaction) -> None:
-        if await self._reject_non_admin(interaction):
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
             return
 
         settings = self.bot.settings
-        lines = ["**Wilhelmina features**", "```txt"]
+        lines = ["**Wilhelmina features**", "```txt", f"home_guild_id = {guild_id}", ""]
         for flag in settings.cog_flags:
             status = "enabled" if settings.is_cog_enabled(flag.extension) else "disabled"
             required = "required" if flag.required else "optional"
@@ -197,7 +263,8 @@ class Admin(commands.GroupCog, group_name="admin"):
 
     @app_commands.command(name="sync", description="Resync Wilhelmina slash commands.")
     async def sync(self, interaction: discord.Interaction) -> None:
-        if await self._reject_non_admin(interaction):
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
             return
 
         settings = self.bot.settings
@@ -211,45 +278,109 @@ class Admin(commands.GroupCog, group_name="admin"):
             return
 
         if mode == "auto":
-            mode = "guild" if settings.home_guild_id else "global"
+            mode = "guild"
 
-        if mode == "guild":
-            if settings.home_guild_id is None:
-                await interaction.response.send_message(
-                    "Cannot sync: `HOME_GUILD_ID` is not set.",
-                    ephemeral=True,
-                )
-                return
-
-            guild = discord.Object(id=settings.home_guild_id)
-            self.bot.tree.copy_global_to(guild=guild)
-            synced = await self.bot.tree.sync(guild=guild)
+        if mode == "global":
             await interaction.response.send_message(
-                f"Synced {len(synced)} command(s) to home guild `{settings.home_guild_id}`.",
+                "Global sync is disabled from Discord commands in dedicated-server mode.",
                 ephemeral=True,
             )
             return
 
-        synced = await self.bot.tree.sync()
+        guild = discord.Object(id=guild_id)
+        self.bot.tree.copy_global_to(guild=guild)
+        synced = await self.bot.tree.sync(guild=guild)
         await interaction.response.send_message(
-            f"Synced {len(synced)} command(s) globally. Global sync can take time to propagate.",
+            f"Synced {len(synced)} command(s) to home guild `{guild_id}`.",
             ephemeral=True,
         )
 
-    @config.command(name="view", description="View Wilhelmina's stored guild configuration.")
-    async def config_view(self, interaction: discord.Interaction) -> None:
-        if await self._reject_non_admin(interaction):
+    @setup.command(name="status", description="Show operational readiness status.")
+    async def setup_status(self, interaction: discord.Interaction) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
             return
 
-        guild_id = await self._resolve_guild_id(interaction)
+        result = self._build_readiness_result(interaction, guild_id)
+        await interaction.response.send_message(
+            _format_readiness_block("Wilhelmina setup status", result),
+            ephemeral=True,
+        )
+
+    @setup.command(name="checklist", description="Show operational setup checklist.")
+    async def setup_checklist(self, interaction: discord.Interaction) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        result = self._build_readiness_result(interaction, guild_id)
+        await interaction.response.send_message(
+            _format_readiness_block(
+                "Wilhelmina setup checklist",
+                result,
+                checklist=True,
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="permissions", description="Show bot permission readiness.")
+    async def permissions(self, interaction: discord.Interaction) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        result = self._build_readiness_result(interaction, guild_id)
+        permission_checks = [
+            check
+            for check in result.checks
+            if ".view_channel" in check.field
+            or ".send_messages" in check.field
+            or ".embed_links" in check.field
+            or ".manage_roles" in check.field
+        ]
+        permission_result = config_validation.ConfigValidationResult(
+            tuple(permission_checks)
+        )
+        await interaction.response.send_message(
+            _format_readiness_block("Wilhelmina permission report", permission_result),
+            ephemeral=True,
+        )
+
+    @logs.command(name="recent", description="Show recent admin audit events.")
+    @app_commands.describe(limit="Number of audit events to show. Range: 1-25.")
+    async def logs_recent(
+        self,
+        interaction: discord.Interaction,
+        limit: app_commands.Range[int, 1, 25] = 10,
+    ) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
         if guild_id is None:
             return
 
         database_path = self._database_path()
         initialize_database(database_path)
         with managed_connection(database_path) as connection:
-            config = guild_config.get_guild_config(connection, guild_id)
+            events = audit_log.list_audit_events(connection, guild_id, limit=limit)
 
+        if not events:
+            await interaction.response.send_message(
+                "No audit events have been recorded yet.",
+                ephemeral=True,
+            )
+            return
+
+        lines = ["**Recent Wilhelmina audit events**", "```txt"]
+        lines.extend(_format_audit_event(event) for event in events)
+        lines.append("```")
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @config.command(name="view", description="View Wilhelmina's stored guild configuration.")
+    async def config_view(self, interaction: discord.Interaction) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        config = self._load_config(guild_id)
         await interaction.response.send_message(
             f"**Wilhelmina guild config**\n{_format_config(config)}",
             ephemeral=True,
@@ -267,10 +398,7 @@ class Admin(commands.GroupCog, group_name="admin"):
         field: str,
         role: discord.Role,
     ) -> None:
-        if await self._reject_non_admin(interaction):
-            return
-
-        guild_id = await self._resolve_guild_id(interaction)
+        guild_id = await self._guard_admin_home_guild(interaction)
         if guild_id is None:
             return
 
@@ -309,10 +437,7 @@ class Admin(commands.GroupCog, group_name="admin"):
         field: str,
         channel: discord.TextChannel,
     ) -> None:
-        if await self._reject_non_admin(interaction):
-            return
-
-        guild_id = await self._resolve_guild_id(interaction)
+        guild_id = await self._guard_admin_home_guild(interaction)
         if guild_id is None:
             return
 
@@ -346,10 +471,7 @@ class Admin(commands.GroupCog, group_name="admin"):
         interaction: discord.Interaction,
         timezone: str,
     ) -> None:
-        if await self._reject_non_admin(interaction):
-            return
-
-        guild_id = await self._resolve_guild_id(interaction)
+        guild_id = await self._guard_admin_home_guild(interaction)
         if guild_id is None:
             return
 
@@ -378,44 +500,15 @@ class Admin(commands.GroupCog, group_name="admin"):
 
     @config.command(name="validate", description="Validate stored guild roles and channels.")
     async def config_validate(self, interaction: discord.Interaction) -> None:
-        if await self._reject_non_admin(interaction):
-            return
-
-        guild_id = await self._resolve_guild_id(interaction)
+        guild_id = await self._guard_admin_home_guild(interaction)
         if guild_id is None:
             return
 
-        database_path = self._database_path()
-        initialize_database(database_path)
-        with managed_connection(database_path) as connection:
-            config = guild_config.get_guild_config(connection, guild_id)
-
-        if config is None:
-            await interaction.response.send_message(
-                "No guild configuration has been stored yet.",
-                ephemeral=True,
-            )
-            return
-
-        guild = interaction.guild
-        issues = guild_config.validate_guild_config(
-            config,
-            role_exists=(lambda role_id: guild.get_role(role_id) is not None) if guild else None,
-            channel_exists=(lambda channel_id: guild.get_channel(channel_id) is not None)
-            if guild
-            else None,
+        result = self._build_readiness_result(interaction, guild_id)
+        await interaction.response.send_message(
+            _format_readiness_block("Wilhelmina guild config validation", result),
+            ephemeral=True,
         )
-
-        lines = ["**Wilhelmina guild config validation**", "```txt"]
-        for issue in issues:
-            marker = "OK" if issue.ok else "!!"
-            lines.append(
-                f"{marker} {issue.field:<24} "
-                f"{_format_config_value(issue.value):<24} {issue.message}"
-            )
-        lines.append("```")
-
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @config.command(name="clear", description="Clear stored guild config or one selected field.")
     @app_commands.describe(
@@ -427,10 +520,7 @@ class Admin(commands.GroupCog, group_name="admin"):
         interaction: discord.Interaction,
         field: str | None = None,
     ) -> None:
-        if await self._reject_non_admin(interaction):
-            return
-
-        guild_id = await self._resolve_guild_id(interaction)
+        guild_id = await self._guard_admin_home_guild(interaction)
         if guild_id is None:
             return
 
