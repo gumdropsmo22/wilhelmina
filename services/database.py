@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 DEFAULT_DATABASE_PATH = Path("data/wilhelmina.sqlite3")
 
 SCHEMA_STATEMENTS: tuple[str, ...] = (
@@ -46,6 +46,25 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     """
     CREATE INDEX IF NOT EXISTS idx_audit_log_guild_created
     ON audit_log (guild_id, created_at DESC)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS onboarding_state (
+        guild_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        state TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        approved_by INTEGER,
+        rejected_by INTEGER,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (guild_id, user_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_onboarding_state_guild_state
+    ON onboarding_state (guild_id, state, updated_at DESC)
     """,
 )
 
