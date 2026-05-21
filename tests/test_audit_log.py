@@ -1,6 +1,7 @@
 from services.audit_log import (
     deserialize_payload,
     list_audit_events,
+    list_audit_events_for_target,
     record_audit_event,
 )
 from services.database import initialize_database, managed_connection
@@ -55,3 +56,40 @@ def test_audit_event_limit_is_bounded(tmp_path):
 
         assert len(list_audit_events(connection, 123, limit=0)) == 1
         assert len(list_audit_events(connection, 123, limit=500)) == 3
+
+
+def test_list_audit_events_for_target_filters_rows(tmp_path):
+    database_path = tmp_path / "wilhelmina.sqlite3"
+    initialize_database(database_path)
+
+    with managed_connection(database_path) as connection:
+        first = record_audit_event(
+            connection,
+            guild_id=123,
+            actor_user_id=456,
+            action="onboarding.start",
+            target="111",
+            created_at="2026-05-20T01:00:00+00:00",
+        )
+        second = record_audit_event(
+            connection,
+            guild_id=123,
+            actor_user_id=456,
+            action="onboarding.approve",
+            target="222",
+            created_at="2026-05-20T02:00:00+00:00",
+        )
+        third = record_audit_event(
+            connection,
+            guild_id=123,
+            actor_user_id=456,
+            action="onboarding.complete",
+            target="111",
+            created_at="2026-05-20T03:00:00+00:00",
+        )
+
+        events = list_audit_events_for_target(connection, 123, 111, limit=10)
+
+    assert first.id != second.id
+    assert [event.id for event in events] == [third.id, first.id]
+    assert all(event.target == "111" for event in events)
