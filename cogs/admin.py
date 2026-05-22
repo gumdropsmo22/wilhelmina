@@ -139,6 +139,30 @@ def _format_onboarding_rows(records: list[onboarding_service.OnboardingRecord]) 
     return "\n".join(lines)
 
 
+def _format_onboarding_summary(summary: onboarding_service.OnboardingSummary) -> str:
+    lines = [
+        "```txt",
+        f"guild_id  = {summary.guild_id}",
+        f"total     = {summary.total}",
+        f"pending   = {summary.pending}",
+        f"approved  = {summary.approved}",
+        f"rejected  = {summary.rejected}",
+        f"completed = {summary.completed}",
+        "```",
+    ]
+    return "\n".join(lines)
+
+
+def _format_onboarding_history(events: list[audit_log.AuditEvent]) -> str:
+    if not events:
+        return "No onboarding history found for that user."
+
+    lines = ["```txt"]
+    lines.extend(_format_audit_event(event) for event in events)
+    lines.append("```")
+    return "\n".join(lines)
+
+
 def _format_user_label(user: discord.User | discord.Member) -> str:
     return getattr(user, "mention", f"`{user.id}`")
 
@@ -432,6 +456,22 @@ class Admin(commands.GroupCog, group_name="admin"):
         lines.append("```")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
+    @onboarding.command(name="summary", description="Show onboarding state counts.")
+    async def onboarding_summary(self, interaction: discord.Interaction) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        database_path = self._database_path()
+        initialize_database(database_path)
+        with managed_connection(database_path) as connection:
+            summary = onboarding_service.summarize_onboarding(connection, guild_id)
+
+        await interaction.response.send_message(
+            f"**Onboarding summary**\n{_format_onboarding_summary(summary)}",
+            ephemeral=True,
+        )
+
     @onboarding.command(name="view", description="View one user's onboarding state.")
     @app_commands.describe(user="User to inspect.")
     async def onboarding_view(
@@ -450,6 +490,36 @@ class Admin(commands.GroupCog, group_name="admin"):
 
         await interaction.response.send_message(
             f"**Onboarding state for {_format_user_label(user)}**\n{_format_onboarding_record(record)}",
+            ephemeral=True,
+        )
+
+    @onboarding.command(name="history", description="Show one user's onboarding audit history.")
+    @app_commands.describe(
+        user="User to inspect.",
+        limit="Number of audit events to show. Range: 1-25.",
+    )
+    async def onboarding_history(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+        limit: app_commands.Range[int, 1, 25] = 10,
+    ) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        database_path = self._database_path()
+        initialize_database(database_path)
+        with managed_connection(database_path) as connection:
+            events = onboarding_service.list_onboarding_history(
+                connection,
+                guild_id,
+                user.id,
+                limit=limit,
+            )
+
+        await interaction.response.send_message(
+            f"**Onboarding history for {_format_user_label(user)}**\n{_format_onboarding_history(events)}",
             ephemeral=True,
         )
 
@@ -614,6 +684,42 @@ class Admin(commands.GroupCog, group_name="admin"):
 
         await interaction.response.send_message(
             f"Completed onboarding for {_format_user_label(user)} as `{after.state}`.",
+            ephemeral=True,
+        )
+
+    @onboarding.command(name="notes", description="Update or clear one user's onboarding notes.")
+    @app_commands.describe(
+        user="User to update.",
+        notes="New notes. Leave empty to clear existing notes.",
+    )
+    async def onboarding_notes(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+        notes: str | None = None,
+    ) -> None:
+        guild_id = await self._guard_admin_home_guild(interaction)
+        if guild_id is None:
+            return
+
+        database_path = self._database_path()
+        initialize_database(database_path)
+        try:
+            with managed_connection(database_path) as connection:
+                _, after = onboarding_service.update_notes(
+                    connection,
+                    guild_id,
+                    user.id,
+                    actor_user_id=interaction.user.id,
+                    notes=notes,
+                )
+        except onboarding_service.OnboardingError as exc:
+            await self._send_onboarding_error(interaction, exc)
+            return
+
+        detail = "cleared" if after.notes is None else "updated"
+        await interaction.response.send_message(
+            f"{detail.capitalize()} onboarding notes for {_format_user_label(user)}.",
             ephemeral=True,
         )
 
