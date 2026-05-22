@@ -118,3 +118,27 @@ def list_audit_events(
     ).fetchall()
 
     return [_row_to_event(row) for row in rows]
+
+
+def list_audit_events_for_target(
+    connection: sqlite3.Connection,
+    guild_id: int,
+    target: str | int,
+    *,
+    limit: int = 10,
+) -> list[AuditEvent]:
+    """Return recent audit events for one guild and target."""
+
+    bounded_limit = max(1, min(int(limit), 100))
+    rows = connection.execute(
+        """
+        SELECT *
+        FROM audit_log
+        WHERE guild_id = ? AND target = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+        """,
+        (int(guild_id), str(target), bounded_limit),
+    ).fetchall()
+
+    return [_row_to_event(row) for row in rows]
