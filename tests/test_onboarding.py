@@ -155,6 +155,89 @@ def test_list_onboarding_records_filters_by_state(tmp_path):
     assert [record.user_id for record in approved_records] == [789]
 
 
+def test_summarize_onboarding_counts_records_by_state(tmp_path):
+    database_path = tmp_path / "wilhelmina.sqlite3"
+    initialize_database(database_path)
+
+    with managed_connection(database_path) as connection:
+        onboarding.start_onboarding(connection, 123, 100, actor_user_id=9001)
+        onboarding.start_onboarding(connection, 123, 200, actor_user_id=9001)
+        onboarding.approve_onboarding(connection, 123, 200, actor_user_id=9002)
+        onboarding.start_onboarding(connection, 123, 300, actor_user_id=9001)
+        onboarding.reject_onboarding(connection, 123, 300, actor_user_id=9003)
+        onboarding.start_onboarding(connection, 123, 400, actor_user_id=9001)
+        onboarding.approve_onboarding(connection, 123, 400, actor_user_id=9002)
+        onboarding.complete_onboarding(connection, 123, 400, actor_user_id=9004)
+
+        summary = onboarding.summarize_onboarding(connection, 123)
+
+    assert summary.guild_id == 123
+    assert summary.total == 4
+    assert summary.pending == 1
+    assert summary.approved == 1
+    assert summary.rejected == 1
+    assert summary.completed == 1
+
+
+def test_update_notes_preserves_state_and_records_audit(tmp_path):
+    database_path = tmp_path / "wilhelmina.sqlite3"
+    initialize_database(database_path)
+
+    with managed_connection(database_path) as connection:
+        onboarding.start_onboarding(connection, 123, 456, actor_user_id=9001)
+        before, after = onboarding.update_notes(
+            connection,
+            123,
+            456,
+            actor_user_id=9002,
+            notes="  updated note  ",
+        )
+        events = audit_log.list_audit_events(connection, 123, limit=10)
+
+    assert before.state == onboarding.PENDING
+    assert after.state == onboarding.PENDING
+    assert after.notes == "updated note"
+    assert events[0].action == "onboarding.update_notes"
+    assert events[0].target == "456"
+
+
+def test_update_notes_requires_existing_record(tmp_path):
+    database_path = tmp_path / "wilhelmina.sqlite3"
+    initialize_database(database_path)
+
+    with managed_connection(database_path) as connection:
+        try:
+            onboarding.update_notes(
+                connection,
+                123,
+                456,
+                actor_user_id=9001,
+                notes="no record yet",
+            )
+        except onboarding.InvalidOnboardingTransition as exc:
+            assert "has not been started" in str(exc)
+        else:
+            raise AssertionError("expected InvalidOnboardingTransition")
+
+
+def test_list_onboarding_history_returns_user_audit_events(tmp_path):
+    database_path = tmp_path / "wilhelmina.sqlite3"
+    initialize_database(database_path)
+
+    with managed_connection(database_path) as connection:
+        onboarding.start_onboarding(connection, 123, 456, actor_user_id=9001)
+        onboarding.update_notes(connection, 123, 456, actor_user_id=9002, notes="note")
+        onboarding.start_onboarding(connection, 123, 789, actor_user_id=9001)
+
+        history = onboarding.list_onboarding_history(connection, 123, 456, limit=10)
+
+    assert [event.action for event in history] == [
+        "onboarding.update_notes",
+        "onboarding.start",
+    ]
+    assert all(event.target == "456" for event in history)
+
+
 def test_invalid_state_is_rejected(tmp_path):
     database_path = tmp_path / "wilhelmina.sqlite3"
     initialize_database(database_path)
