@@ -46,6 +46,16 @@ class OnboardingRecord:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class OnboardingSummary:
+    guild_id: int
+    total: int
+    pending: int
+    approved: int
+    rejected: int
+    completed: int
+
+
 def _validate_state(state: str) -> OnboardingStateValue:
     normalized = (state or "").strip().lower()
     if normalized not in VALID_STATES:
@@ -181,6 +191,57 @@ def list_onboarding_records(
         ).fetchall()
 
     return [_row_to_record(row) for row in rows if row is not None]
+
+
+def summarize_onboarding(
+    connection: sqlite3.Connection,
+    guild_id: int | str,
+) -> OnboardingSummary:
+    """Count onboarding records by state for one guild."""
+
+    normalized_guild_id = validate_snowflake(guild_id, "guild_id")
+    counts = {state: 0 for state in VALID_STATES}
+    rows = connection.execute(
+        """
+        SELECT state, COUNT(*) AS count
+        FROM onboarding_state
+        WHERE guild_id = ?
+        GROUP BY state
+        """,
+        (normalized_guild_id,),
+    ).fetchall()
+
+    for row in rows:
+        state = _validate_state(str(row["state"]))
+        counts[state] = int(row["count"])
+
+    return OnboardingSummary(
+        guild_id=normalized_guild_id,
+        total=sum(counts.values()),
+        pending=counts[PENDING],
+        approved=counts[APPROVED],
+        rejected=counts[REJECTED],
+        completed=counts[COMPLETED],
+    )
+
+
+def list_onboarding_history(
+    connection: sqlite3.Connection,
+    guild_id: int | str,
+    user_id: int | str,
+    *,
+    limit: int = 10,
+) -> list[audit_log.AuditEvent]:
+    """Return recent audit events for one user's onboarding record."""
+
+    normalized_guild_id = validate_snowflake(guild_id, "guild_id")
+    normalized_user_id = validate_snowflake(user_id, "user_id")
+    return audit_log.list_audit_events_for_target(
+        connection,
+        normalized_guild_id,
+        normalized_user_id,
+        limit=limit,
+    )
 
 
 def _apply_state_fields(
@@ -328,6 +389,41 @@ def start_onboarding(
         guild_id=normalized_guild_id,
         actor_user_id=normalized_actor_id,
         action="onboarding.start",
+        target_user_id=normalized_user_id,
+        before=before,
+        after=after,
+    )
+    return before, after
+
+
+def update_notes(
+    connection: sqlite3.Connection,
+    guild_id: int | str,
+    user_id: int | str,
+    *,
+    actor_user_id: int | str,
+    notes: str | None,
+) -> tuple[OnboardingRecord, OnboardingRecord]:
+    """Update admin notes for an existing onboarding record without changing state."""
+
+    normalized_guild_id = validate_snowflake(guild_id, "guild_id")
+    normalized_user_id = validate_snowflake(user_id, "user_id")
+    normalized_actor_id = validate_snowflake(actor_user_id, "actor_user_id")
+    before = get_onboarding_record(connection, normalized_guild_id, normalized_user_id)
+    if before is None:
+        raise InvalidOnboardingTransition("onboarding has not been started for this user")
+
+    after = _update_existing_record(
+        connection,
+        guild_id=normalized_guild_id,
+        user_id=normalized_user_id,
+        fields={"notes": _validate_notes(notes), "updated_at": utc_now_iso()},
+    )
+    _record_audit(
+        connection,
+        guild_id=normalized_guild_id,
+        actor_user_id=normalized_actor_id,
+        action="onboarding.update_notes",
         target_user_id=normalized_user_id,
         before=before,
         after=after,
