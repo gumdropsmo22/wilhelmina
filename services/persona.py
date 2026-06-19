@@ -149,7 +149,7 @@ async def render_persona_text(
     """Generate Wilhelmina-styled text, falling back deterministically when AI is unavailable."""
 
     channel = get_voice_channel(feature_key)
-    fallback_text = fallback or channel.fallback
+    fallback_text = channel.fallback if fallback is None else fallback
     prompt = build_prompt(feature_key=feature_key, task=task, context=context)
     text = await generate_text_async(prompt)
     if not text:
