@@ -45,6 +45,13 @@ def test_rules_version_activation_and_acceptance_are_idempotent(tmp_path):
         assert first.acceptance.rules_version_id == active.id
         assert second.acceptance.rules_version_id == active.id
 
+        lookup = rules.get_acceptance_for_user(connection, guild_id=123, user_id=456)
+        assert lookup is not None
+        assert lookup.rules_version_id == active.id
+
+        missing = rules.get_acceptance_for_user(connection, guild_id=123, user_id=789)
+        assert missing is None
+
         summary = rules.summarize_acceptance(connection, guild_id=123)
         assert summary.version_tag == "v1"
         assert summary.accepted_count == 1
