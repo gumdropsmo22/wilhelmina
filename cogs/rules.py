@@ -17,6 +17,34 @@ def _database_path(bot: commands.Bot) -> Path:
     return Path(bot.settings.database_path)
 
 
+def _home_guild_id(bot: commands.Bot) -> int | None:
+    guild_id = getattr(bot.settings, "home_guild_id", None)
+    return int(guild_id) if guild_id is not None else None
+
+
+async def _guard_home_guild(interaction: discord.Interaction, bot: commands.Bot) -> bool:
+    home_guild_id = _home_guild_id(bot)
+    if home_guild_id is None:
+        await interaction.response.send_message(
+            "Cannot resolve Wilhelmina's home guild. Set `HOME_GUILD_ID` first.",
+            ephemeral=True,
+        )
+        return False
+    if interaction.guild_id is None:
+        await interaction.response.send_message(
+            "Run this command inside Wilhelmina's configured home guild.",
+            ephemeral=True,
+        )
+        return False
+    if int(interaction.guild_id) != home_guild_id:
+        await interaction.response.send_message(
+            "This covenant only belongs to Wilhelmina's configured home guild.",
+            ephemeral=True,
+        )
+        return False
+    return True
+
+
 def _chunk_text(value: str, *, size: int = RULES_FIELD_LIMIT) -> list[str]:
     text = value.strip()
     if not text:
@@ -94,6 +122,8 @@ class CovenantGateView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
+        if not await _guard_home_guild(interaction, self.bot):
+            return
         await interaction.response.defer(ephemeral=True, thinking=True)
         initialize_database(_database_path(self.bot))
         with managed_connection(_database_path(self.bot)) as connection:
@@ -135,11 +165,7 @@ class Rules(commands.Cog):
 
     @app_commands.command(name="rules", description="Read and accept the server covenant.")
     async def rules(self, interaction: discord.Interaction) -> None:
-        if interaction.guild_id is None:
-            await interaction.response.send_message(
-                "The covenant only exists inside the home server.",
-                ephemeral=True,
-            )
+        if not await _guard_home_guild(interaction, self.bot):
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -182,6 +208,9 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    async def _guard(self, interaction: discord.Interaction) -> bool:
+        return await _guard_home_guild(interaction, self.bot)
+
     @app_commands.command(name="set", description="Create or update a rules covenant version.")
     @app_commands.describe(
         version_tag="Short version label, such as v1 or 2026-06.",
@@ -201,8 +230,7 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
         accept_label: str = "I accept the covenant",
         activate: bool = False,
     ) -> None:
-        if interaction.guild_id is None:
-            await interaction.response.send_message("Run this inside a server.", ephemeral=True)
+        if not await self._guard(interaction):
             return
 
         initialize_database(_database_path(self.bot))
@@ -237,8 +265,7 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
 
     @app_commands.command(name="activate", description="Make one covenant version active.")
     async def activate(self, interaction: discord.Interaction, version_tag: str) -> None:
-        if interaction.guild_id is None:
-            await interaction.response.send_message("Run this inside a server.", ephemeral=True)
+        if not await self._guard(interaction):
             return
 
         initialize_database(_database_path(self.bot))
@@ -259,10 +286,48 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
             ephemeral=True,
         )
 
+    @app_commands.command(name="preview", description="Preview a covenant version without publishing it.")
+    async def preview(self, interaction: discord.Interaction, version_tag: str | None = None) -> None:
+        if not await self._guard(interaction):
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        initialize_database(_database_path(self.bot))
+        try:
+            with managed_connection(_database_path(self.bot)) as connection:
+                if version_tag:
+                    rules = rules_service.get_rules_version(
+                        connection,
+                        guild_id=interaction.guild_id,
+                        version_tag=version_tag,
+                    )
+                else:
+                    rules = rules_service.get_active_rules(
+                        connection,
+                        guild_id=interaction.guild_id,
+                    )
+        except rules_service.RulesError as exc:
+            await interaction.edit_original_response(content=f"Rules error: {exc}")
+            return
+
+        if rules is None:
+            await interaction.edit_original_response(content="No covenant version is available.")
+            return
+
+        embed = await build_rules_embed(interaction=interaction, rules=rules, mode="admin-preview")
+        view = CovenantGateView(
+            bot=self.bot,
+            guild_id=interaction.guild_id,
+            rules_version_id=rules.id,
+            accept_label=rules.accept_label,
+            author_id=interaction.user.id,
+            persistent=False,
+        )
+        await interaction.edit_original_response(embed=embed, view=view)
+
     @app_commands.command(name="publish", description="Publish the active Covenant Gate to a channel.")
     async def publish(self, interaction: discord.Interaction, channel: discord.TextChannel) -> None:
-        if interaction.guild_id is None:
-            await interaction.response.send_message("Run this inside a server.", ephemeral=True)
+        if not await self._guard(interaction):
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -307,8 +372,7 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
 
     @app_commands.command(name="summary", description="Show active covenant acceptance count.")
     async def summary(self, interaction: discord.Interaction) -> None:
-        if interaction.guild_id is None:
-            await interaction.response.send_message("Run this inside a server.", ephemeral=True)
+        if not await self._guard(interaction):
             return
 
         initialize_database(_database_path(self.bot))
@@ -332,14 +396,63 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
             ephemeral=True,
         )
 
+    @app_commands.command(name="user", description="Show whether a user accepted the active covenant.")
+    async def user(self, interaction: discord.Interaction, user: discord.Member) -> None:
+        if not await self._guard(interaction):
+            return
+
+        initialize_database(_database_path(self.bot))
+        try:
+            with managed_connection(_database_path(self.bot)) as connection:
+                active_rules = rules_service.get_active_rules(
+                    connection,
+                    guild_id=interaction.guild_id,
+                )
+                acceptance = rules_service.get_acceptance_for_user(
+                    connection,
+                    guild_id=interaction.guild_id,
+                    user_id=user.id,
+                    rules_version_id=active_rules.id if active_rules else None,
+                )
+        except rules_service.RulesError as exc:
+            await interaction.response.send_message(f"Rules error: {exc}", ephemeral=True)
+            return
+
+        if active_rules is None:
+            await interaction.response.send_message(
+                "No active covenant has been configured yet.",
+                ephemeral=True,
+            )
+            return
+
+        if acceptance is None:
+            status = "not accepted"
+            accepted_at = "unset"
+            accepted_via = "unset"
+        else:
+            status = "accepted"
+            accepted_at = acceptance.accepted_at
+            accepted_via = acceptance.accepted_via
+
+        await interaction.response.send_message(
+            "**Covenant user status**\n"
+            "```txt\n"
+            f"user           = {user.id}\n"
+            f"version        = {active_rules.version_tag}\n"
+            f"status         = {status}\n"
+            f"accepted_at    = {accepted_at}\n"
+            f"accepted_via   = {accepted_via}\n"
+            "```",
+            ephemeral=True,
+        )
+
     @app_commands.command(name="list", description="List recent covenant versions.")
     async def list_versions(
         self,
         interaction: discord.Interaction,
         limit: app_commands.Range[int, 1, 25] = 10,
     ) -> None:
-        if interaction.guild_id is None:
-            await interaction.response.send_message("Run this inside a server.", ephemeral=True)
+        if not await self._guard(interaction):
             return
 
         initialize_database(_database_path(self.bot))
