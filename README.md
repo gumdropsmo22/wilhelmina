@@ -17,6 +17,8 @@ Current cogs:
 ```txt
 cogs.core          /about, /uptime
 cogs.admin         /admin diagnostics, /admin features, /admin sync, /admin config ...
+cogs.help          /help
+cogs.rules         /rules, /rules-admin ...
 cogs.invite        /invite
 cogs.roll          /roll
 cogs.eight_ball    /8ball
@@ -26,6 +28,8 @@ cogs.fortune       /fortune
 Each optional feature has its own flag:
 
 ```env
+ENABLE_HELP=true
+ENABLE_RULES=true
 ENABLE_INVITE=false
 ENABLE_ROLL=false
 ENABLE_EIGHT_BALL=false
@@ -93,13 +97,15 @@ COMMAND_SYNC_MODE=guild
 DATABASE_PATH=data/wilhelmina.sqlite3
 ENABLE_CORE=true
 ENABLE_ADMIN=true
+ENABLE_HELP=true
+ENABLE_RULES=true
 ```
 
 `DEV_GUILD_ID` is accepted as a legacy alias for `HOME_GUILD_ID`, but new setups should use `HOME_GUILD_ID`.
 
 ## SQLite persistence
 
-Wilhelmina stores dedicated-server configuration and administrative audit events in SQLite.
+Wilhelmina stores dedicated-server configuration, administrative audit events, onboarding state, rules versions, and rules acceptance records in SQLite.
 
 ```env
 DATABASE_PATH=data/wilhelmina.sqlite3
@@ -107,15 +113,40 @@ DATABASE_PATH=data/wilhelmina.sqlite3
 
 Relative paths resolve from the repository root. The SQLite file is local runtime state and should be backed up before deployment moves, schema changes, or manual database edits.
 
-Phase 2 persistence stores:
+Current persistence stores:
 
 ```txt
 guild_config
 audit_log
+onboarding_state
+rules_versions
+rules_acceptance
 schema_migrations
 ```
 
 The stored guild configuration is the source of truth for server role/channel IDs after Phase 2. Environment variables for role/channel IDs are not used by the new config layer.
+
+## Living Command Grimoire
+
+`/help` opens Wilhelmina's dynamic public command grimoire. It reads the live slash-command tree, hides admin tooling, groups public commands into categories, and can show sealed future doors such as tarot, readings, rituals, welcome, and broadcast.
+
+The grimoire uses the Persona Engine's `guide` voice channel for short AI-polished intro text when `OPENAI_API_KEY` is configured. If AI is unavailable, it falls back to deterministic copy.
+
+## Covenant Gate rules UI
+
+`/rules` opens the active rules covenant for a user and lets them accept it through a button. Acceptance is stored with the user ID, guild ID, active rules version, method, and timestamp.
+
+Admin commands:
+
+```txt
+/rules-admin set
+/rules-admin activate
+/rules-admin publish
+/rules-admin summary
+/rules-admin list
+```
+
+The Covenant Gate records acceptance only. It does **not** assign roles, mutate permissions, or transform the server. Later role automation can consume the stored acceptance records safely.
 
 ## Admin config commands
 
@@ -132,9 +163,25 @@ The `/admin config` commands are administrator-only and always respond ephemeral
 
 These commands only store, clear, validate, and audit configuration. They do **not** create roles, create channels, assign roles, onboard users, mutate permissions, schedule jobs, or transform a server.
 
+## Persona Engine
+
+Wilhelmina now has a central Persona Engine with one base voice and feature-specific voice channels.
+
+Current voice channels:
+
+```txt
+guide           /help
+ritual          /rules and rules acceptance
+oracle          /fortune
+administrative  admin/status copy hooks
+welcome         future welcome messages
+```
+
+This keeps Wilhelmina recognizable while allowing each feature to speak through the right channel. The old umbrella oracle/persona architecture remains removed.
+
 ## AI-backed features
 
-`/8ball` and `/fortune` use AI first when `OPENAI_API_KEY` is configured, then fall back to static responses if AI is unavailable.
+`/8ball`, `/fortune`, `/help`, and `/rules` can use AI first when `OPENAI_API_KEY` is configured, then fall back to static or stored responses if AI is unavailable.
 
 ```env
 OPENAI_API_KEY=
@@ -170,6 +217,8 @@ ENABLE_ADMIN=true
 Optional cogs:
 
 ```env
+ENABLE_HELP=true
+ENABLE_RULES=true
 ENABLE_INVITE=false
 ENABLE_ROLL=false
 ENABLE_EIGHT_BALL=false
@@ -177,7 +226,3 @@ ENABLE_FORTUNE=false
 ```
 
 Required cogs fail startup when broken. Optional cogs are logged and skipped so unfinished features do not take down the runtime.
-
-## License
-
-MIT © 2025
