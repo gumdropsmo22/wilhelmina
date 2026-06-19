@@ -89,11 +89,12 @@ class HelpView(discord.ui.View):
         )
 
     async def render(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
         page = self.current_page()
         self._sync_buttons()
         intro = await self.intro_text(interaction, page)
         embed = help_service.build_embed(page, intro=intro)
-        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.edit_original_response(embed=embed, view=self)
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
     async def previous_page(
