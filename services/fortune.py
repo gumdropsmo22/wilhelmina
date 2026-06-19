@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 
-from services.ai import generate_text_async
+from services.persona import render_persona_text
 
 FALLBACKS = [
     "Your future is cloudy with a chance of regrettable confidence.",
@@ -14,16 +14,18 @@ _recent_fortunes: list[str] = []
 
 
 async def generate_fortune() -> str:
-    """Generate a single fortune line, using AI first and static fallback second."""
-
-    prompt = (
-        "Write a single eerie fortune in the voice of Wilhelmina, a sarcastic digital witch.\n"
-        "The fortune should be dark, poetic, strange, and no longer than one sentence.\n"
-        "Avoid clichés and do not repeat phrasing."
-    )
+    """Generate a single fortune line through the Oracle voice channel."""
 
     for _ in range(3):
-        line = await generate_text_async(prompt)
+        line = await render_persona_text(
+            feature_key="fortune",
+            task=(
+                "Write one eerie fortune in Wilhelmina's oracle voice. It must be a single "
+                "sentence, original, readable, and darkly poetic."
+            ),
+            context={"recent_fortunes": "; ".join(_recent_fortunes) or "none"},
+            fallback="",
+        )
         if _is_usable(line):
             _cache_response(line)
             return line
