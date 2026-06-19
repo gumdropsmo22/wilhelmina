@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 DEFAULT_DATABASE_PATH = Path("data/wilhelmina.sqlite3")
 
 SCHEMA_STATEMENTS: tuple[str, ...] = (
@@ -65,6 +65,50 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     """
     CREATE INDEX IF NOT EXISTS idx_onboarding_state_guild_state
     ON onboarding_state (guild_id, state, updated_at DESC)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS rules_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER NOT NULL,
+        version_tag TEXT NOT NULL,
+        title TEXT NOT NULL,
+        intro_text TEXT NOT NULL,
+        body_text TEXT NOT NULL,
+        accept_label TEXT NOT NULL DEFAULT 'I accept the covenant',
+        is_active INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0, 1)),
+        published_channel_id INTEGER,
+        published_message_id INTEGER,
+        created_by INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (guild_id, version_tag)
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_rules_versions_active
+    ON rules_versions (guild_id)
+    WHERE is_active = 1
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_rules_versions_guild_updated
+    ON rules_versions (guild_id, updated_at DESC)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS rules_acceptance (
+        guild_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        rules_version_id INTEGER NOT NULL,
+        accepted_via TEXT NOT NULL,
+        accepted_at TEXT NOT NULL,
+        PRIMARY KEY (guild_id, user_id, rules_version_id),
+        FOREIGN KEY (rules_version_id)
+            REFERENCES rules_versions (id)
+            ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_rules_acceptance_guild_user
+    ON rules_acceptance (guild_id, user_id, accepted_at DESC)
     """,
 )
 
