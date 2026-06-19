@@ -141,8 +141,10 @@ Admin commands:
 ```txt
 /rules-admin set
 /rules-admin activate
+/rules-admin preview
 /rules-admin publish
 /rules-admin summary
+/rules-admin user
 /rules-admin list
 ```
 
