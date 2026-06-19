@@ -7,6 +7,13 @@ from discord.ext import commands
 from services import help as help_service
 from services.persona import render_persona_text
 
+HELP_CATEGORY_CHOICES = [
+    app_commands.Choice(name="Core", value="core"),
+    app_commands.Choice(name="Divination", value="divination"),
+    app_commands.Choice(name="Server", value="server"),
+    app_commands.Choice(name="Miscellany", value="misc"),
+]
+
 
 class HelpCategorySelect(discord.ui.Select):
     """Category selector for the Living Command Grimoire."""
@@ -126,16 +133,20 @@ class Help(commands.Cog):
         category="Optional grimoire category to open first.",
         public="Show the grimoire publicly instead of only to you.",
     )
+    @app_commands.choices(category=HELP_CATEGORY_CHOICES)
     async def help(
         self,
         interaction: discord.Interaction,
-        category: str | None = None,
+        category: app_commands.Choice[str] | None = None,
         public: bool = False,
     ) -> None:
         await interaction.response.defer(ephemeral=not public, thinking=True)
         entries = help_service.collect_public_commands(self.bot)
         categories = help_service.available_categories(entries)
-        selected = category if category in categories else (categories[0] if categories else "misc")
+        requested_category = category.value if category is not None else None
+        selected = requested_category if requested_category in categories else (
+            categories[0] if categories else "misc"
+        )
         page = help_service.build_page(entries, category=selected)
         intro = await render_persona_text(
             feature_key="help",
