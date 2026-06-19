@@ -94,6 +94,7 @@ class CovenantGateView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
         initialize_database(_database_path(self.bot))
         with managed_connection(_database_path(self.bot)) as connection:
             rules = rules_service.get_rules_version_by_id(connection, self.rules_version_id)
@@ -122,7 +123,7 @@ class CovenantGateView(discord.ui.View):
                 else "The covenant has taken your name."
             ),
         )
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.followup.send(message, ephemeral=True)
 
 
 @app_commands.guild_only()
@@ -141,6 +142,7 @@ class Rules(commands.Cog):
             )
             return
 
+        await interaction.response.defer(ephemeral=True, thinking=True)
         initialize_database(_database_path(self.bot))
         try:
             with managed_connection(_database_path(self.bot)) as connection:
@@ -149,16 +151,14 @@ class Rules(commands.Cog):
                     guild_id=interaction.guild_id,
                 )
         except rules_service.RulesNotConfigured:
-            await interaction.response.send_message(
-                "No active covenant has been configured yet.",
-                ephemeral=True,
+            await interaction.edit_original_response(
+                content="No active covenant has been configured yet."
             )
             return
 
         if active_rules is None:
-            await interaction.response.send_message(
-                "No active covenant has been configured yet.",
-                ephemeral=True,
+            await interaction.edit_original_response(
+                content="No active covenant has been configured yet."
             )
             return
 
@@ -171,7 +171,7 @@ class Rules(commands.Cog):
             author_id=interaction.user.id,
             persistent=False,
         )
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.edit_original_response(embed=embed, view=view)
 
 
 @app_commands.guild_only()
