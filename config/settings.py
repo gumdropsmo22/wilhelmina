@@ -68,6 +68,18 @@ COG_FLAGS: tuple[CogFlag, ...] = (
         required=True,
     ),
     CogFlag(
+        extension="cogs.help",
+        env_var="ENABLE_HELP",
+        default_enabled=True,
+        description="Living Command Grimoire for public slash-command discovery.",
+    ),
+    CogFlag(
+        extension="cogs.rules",
+        env_var="ENABLE_RULES",
+        default_enabled=True,
+        description="Covenant Gate rules UI and acceptance tracking.",
+    ),
+    CogFlag(
         extension="cogs.invite",
         env_var="ENABLE_INVITE",
         default_enabled=False,
@@ -312,6 +324,8 @@ COMMAND_SYNC_MODE = _get_command_sync_mode_or_default()
 
 ENABLE_CORE = _get_bool_or_default("ENABLE_CORE", default=True)
 ENABLE_ADMIN = _get_bool_or_default("ENABLE_ADMIN", default=True)
+ENABLE_HELP = _get_bool_or_default("ENABLE_HELP", default=True)
+ENABLE_RULES = _get_bool_or_default("ENABLE_RULES", default=True)
 ENABLE_INVITE = _get_bool_or_default("ENABLE_INVITE", default=False)
 ENABLE_ROLL = _get_bool_or_default("ENABLE_ROLL", default=False)
 ENABLE_EIGHT_BALL = _get_bool_or_default("ENABLE_EIGHT_BALL", default=False)
