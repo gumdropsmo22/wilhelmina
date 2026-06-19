@@ -388,6 +388,35 @@ def accept_rules_version(
     return AcceptanceResult(acceptance=acceptance, already_accepted=already_accepted)
 
 
+def get_acceptance_for_user(
+    connection: sqlite3.Connection,
+    *,
+    guild_id: int,
+    user_id: int,
+    rules_version_id: int | None = None,
+) -> RulesAcceptance | None:
+    """Return a user's acceptance for a specific or active rules version."""
+
+    target_version_id = rules_version_id
+    if target_version_id is None:
+        active = get_active_rules(connection, guild_id=guild_id, required=False)
+        if active is None:
+            return None
+        target_version_id = active.id
+
+    row = connection.execute(
+        """
+        SELECT *
+        FROM rules_acceptance
+        WHERE guild_id = ? AND user_id = ? AND rules_version_id = ?
+        """,
+        (int(guild_id), int(user_id), int(target_version_id)),
+    ).fetchone()
+    if row is None:
+        return None
+    return _row_to_acceptance(row)
+
+
 def update_published_message(
     connection: sqlite3.Connection,
     *,
