@@ -35,11 +35,11 @@ class EightBallServiceTests(unittest.IsolatedAsyncioTestCase):
 
 class FortuneServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_generate_fortune_uses_ai_when_available(self):
-        with mock.patch("services.fortune.generate_text_async", return_value="A crisp omen."):
+        with mock.patch("services.fortune.render_persona_text", return_value="A crisp omen."):
             self.assertEqual(await fortune.generate_fortune(), "A crisp omen.")
 
     async def test_generate_fortune_uses_fallback_when_ai_empty(self):
-        with mock.patch("services.fortune.generate_text_async", return_value=""):
+        with mock.patch("services.fortune.render_persona_text", return_value=""):
             with mock.patch("services.fortune.random.choice", return_value="fallback fortune"):
                 self.assertEqual(await fortune.generate_fortune(), "fallback fortune")
 
