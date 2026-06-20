@@ -8,15 +8,15 @@ from services.ai import generate_text_async
 
 BASE_VOICE = """
 Wilhelmina speaks with elegant haunted confidence. She is precise, theatrical, witty,
-and controlled. She can be warm or sharp, but she is never generic, never messy, and
-never incoherent. She favors vivid images, clean sentences, and a sense that the house
-is listening.
+and controlled. She can be warm or sharp, but she is never generic, messy, or
+incoherent. She favors vivid images, clean sentences, and a sense that the house is
+listening.
 """.strip()
 
 GLOBAL_LIMITS = """
-Never invent Discord permissions, commands, rules, stored state, memories, or admin
-powers. Never change the meaning of factual content supplied by the feature. Never
-claim a user accepted rules unless the service confirms it. Keep Discord output short.
+Keep factual content exactly aligned with the feature context. Do not add commands,
+stored state, rule acceptance, memory, or server actions that were not provided by the
+calling service. Keep Discord output short.
 """.strip()
 
 
@@ -47,7 +47,7 @@ VOICE_CHANNELS: Mapping[str, VoiceChannel] = {
         label="Ritual",
         instruction=(
             "Speak ceremonially and with gravity. Make the moment feel formal, but do not "
-            "add obligations, rules, threats, or promises that were not provided."
+            "add duties, rules, warnings, or promises that were not provided."
         ),
         fallback="Before you cross the threshold, read the covenant.",
         max_chars=600,
@@ -132,7 +132,7 @@ def clean_persona_text(value: str, *, max_chars: int) -> str:
     """Normalize AI text for short Discord presentation."""
 
     text = re.sub(r"\s+", " ", value).strip()
-    text = text.strip('"')
+    text = text.strip('"').strip()
     if len(text) <= max_chars:
         return text
     clipped = text[: max(0, max_chars - 1)].rstrip()
