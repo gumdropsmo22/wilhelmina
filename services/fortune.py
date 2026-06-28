@@ -14,13 +14,13 @@ _recent_fortunes: list[str] = []
 
 
 async def generate_fortune() -> str:
-    """Generate a single fortune line through the Oracle voice channel."""
+    """Generate a single fortune line through Wilhelmina's base voice."""
 
     for _ in range(3):
         line = await render_persona_text(
             feature_key="fortune",
             task=(
-                "Write one eerie fortune in Wilhelmina's oracle voice. It must be a single "
+                "Write one eerie fortune in Wilhelmina's base voice. It must be a single "
                 "sentence, original, readable, and darkly poetic."
             ),
             context={"recent_fortunes": "; ".join(_recent_fortunes) or "none"},
