@@ -1,13 +1,14 @@
 from services import persona
 
 
-def test_voice_channel_routes_are_stable():
-    assert persona.get_voice_channel("help").key == "guide"
-    assert persona.get_voice_channel("rules_intro").key == "ritual"
-    assert persona.get_voice_channel("rules_acceptance").key == "ritual"
+def test_feature_profile_routes_are_stable():
+    assert persona.get_feature_profile("help").key == "help"
+    assert persona.get_feature_profile("rules_intro").key == "rules_intro"
+    assert persona.get_feature_profile("rules_acceptance").key == "rules_acceptance"
+    assert persona.get_feature_profile("unknown").key == "help"
 
 
-def test_prompt_includes_base_voice_channel_and_context():
+def test_prompt_includes_base_voice_feature_and_context_without_voice_channels():
     prompt = persona.build_prompt(
         feature_key="help",
         task="Write a grimoire intro.",
@@ -15,7 +16,10 @@ def test_prompt_includes_base_voice_channel_and_context():
     )
 
     assert "Base voice" in prompt
-    assert "Voice channel: Guide" in prompt
+    assert "cyber witch haunting a private Discord server" in prompt
+    assert "hard boundary" in prompt
+    assert "Feature:" in prompt
+    assert "Voice channel" not in prompt
     assert "Write a grimoire intro." in prompt
     assert "visible_commands" in prompt
     assert "/about, /help" in prompt
