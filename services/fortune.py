@@ -8,6 +8,9 @@ FALLBACKS = [
     "Your future is cloudy with a chance of regrettable confidence.",
     "At midnight, something misplaced will return with opinions.",
     "Beware the full moon; it seems overly interested.",
+    "A bad decision is approaching in nice shoes.",
+    "Something you ignored is about to become very loud.",
+    "You will survive the week. Not gracefully, but technically.",
 ]
 
 _recent_fortunes: list[str] = []
