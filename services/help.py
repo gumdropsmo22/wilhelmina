@@ -8,10 +8,16 @@ from discord.ext import commands
 
 ADMIN_ROOTS = {"admin", "rules-admin"}
 CATEGORY_LABELS = {
-    "core": "Core",
+    "core": "Basics",
     "divination": "Divination",
     "server": "Server",
-    "misc": "Miscellany",
+    "misc": "Loose Ends",
+}
+CATEGORY_DESCRIPTIONS = {
+    "core": "Core commands for checking what Wilhelmina is, whether she is alive, and how to use the obvious without making it a production.",
+    "divination": "Dice, fortunes, and other questionable methods of outsourcing your judgment.",
+    "server": "Rules, access, and the machinery keeping this place from collapsing into decorative rubble.",
+    "misc": "Commands that exist outside the cleaner categories, because apparently not everything has the dignity to fit.",
 }
 CATEGORY_ORDER = ("core", "divination", "server", "misc")
 DEFAULT_CATEGORY_MAP = {
@@ -32,7 +38,7 @@ COMING_SOON = {
 
 @dataclass(frozen=True)
 class HelpEntry:
-    """One public slash command entry in the Living Command Grimoire."""
+    """One public slash command entry in the Command Grimoire."""
 
     path: str
     description: str
@@ -103,7 +109,7 @@ def collect_public_commands(bot: commands.Bot) -> tuple[HelpEntry, ...]:
         entries.append(
             HelpEntry(
                 path=command_path(command),
-                description=command.description or "No description has been etched yet.",
+                description=command.description or "No description has been written yet.",
                 category=category,
             )
         )
@@ -136,7 +142,7 @@ def build_page(
     page: int = 0,
     per_page: int = 6,
 ) -> HelpPage:
-    """Build one category page for the Living Command Grimoire."""
+    """Build one category page for the Command Grimoire."""
 
     categories = available_categories(entries)
     selected = category if category in categories else (categories[0] if categories else "misc")
@@ -158,16 +164,20 @@ def build_embed(page: HelpPage, *, intro: str) -> discord.Embed:
     """Render a grimoire page as a Discord embed."""
 
     embed = discord.Embed(
-        title=f"Wilhelmina's Living Command Grimoire — {page.category_label}",
+        title=f"Wilhelmina's Command Grimoire — {page.category_label}",
         description=intro,
         color=0x6E00FF,
     )
     embed.set_author(name="WILHELMINA • GRIMOIRE", icon_url="cdn/witch-sigil.png")
 
+    category_description = CATEGORY_DESCRIPTIONS.get(page.category)
+    if category_description:
+        embed.add_field(name="This section", value=category_description, inline=False)
+
     if not page.entries:
         embed.add_field(
-            name="No doors found",
-            value="This wing of the grimoire is quiet for now.",
+            name="Nothing here yet",
+            value="No commands are listed here yet. Tragic, but survivable.",
             inline=False,
         )
     else:
@@ -176,7 +186,7 @@ def build_embed(page: HelpPage, *, intro: str) -> discord.Embed:
 
     if page.coming_soon:
         embed.add_field(
-            name="Sealed doors",
+            name="Locked for Later",
             value=", ".join(page.coming_soon),
             inline=False,
         )
