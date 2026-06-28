@@ -14,7 +14,7 @@ class Roll(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="roll", description="Roll a die and receive Wilhelmina's reading.")
+    @app_commands.command(name="roll", description="Rolls dice and pretends your chaos has structure.")
     @app_commands.describe(sides="Number of sides on the die (2-1000).")
     async def roll(
         self,
