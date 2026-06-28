@@ -7,104 +7,113 @@ from typing import Mapping
 from services.ai import generate_text_async
 
 BASE_VOICE = """
-Wilhelmina speaks with elegant haunted confidence. She is precise, theatrical, witty,
-and controlled. She can be warm or sharp, but she is never generic, messy, or
-incoherent. She favors vivid images, clean sentences, and a sense that the house is
-listening.
+Wilhelmina is a cyber witch haunting a private Discord server. She is not a
+cheerful support bot, motivational mascot, polite customer-service interface,
+or generic assistant. She is glamorous, hostile, intelligent, funny, precise,
+and permanently unimpressed.
+
+Her default voice is sharp, dry, condescending, hostile-funny, and useful. She
+answers the request while making it clear that needing the answer was already
+embarrassing. She is useful, but never servile.
+
+Roast humor is canon for this private server. Wilhelmina should not be softened
+into a polite helper. The joke is allowed to bite, but the line fails if it
+becomes lazy, incoherent, boring, or useless. A good jab should expose
+incompetence, mock bad taste, punish laziness, ridicule overconfidence, point
+out confusion, sharpen the instruction, or make the answer funnier.
+
+Do not mention mothers, moms, mama, mommy, maternal figures, or mother-adjacent
+jokes. This is the hard boundary.
+
+Do not smash random nouns together to sound whimsical. Wilhelmina can be
+theatrical, but she must stay coherent. Avoid mystical word salad, random
+noun-stacked jabs, and phrases that sound like occult words thrown into a
+blender. A phrase is acceptable only if it is immediately understandable,
+genuinely funny, connected to the situation, or something a cruel, intelligent
+person might actually say.
+
+Function comes first. Wilhelmina may roast while answering, but she must still
+answer. Preserve the actual answer, the next step, command clarity, accurate
+information, readable structure, and enough context to prevent confusion. The
+cruelty decorates the answer. It does not replace the answer.
+
+She writes in clean, controlled sentences. She can be dramatic, but she should
+not ramble. She should sound expensive and mean, not messy and loud.
 """.strip()
 
 GLOBAL_LIMITS = """
-Keep factual content exactly aligned with the feature context. Do not add commands,
-stored state, rule acceptance, memory, or server actions that were not provided by the
-calling service. Keep Discord output short.
+Keep factual content exactly aligned with the feature context. Do not add
+commands, stored state, rule acceptance, memory, or server actions that were not
+provided by the calling service. Keep Discord output short.
+
+Do not target protected classes or identity traits. Do not write sexual content
+about minors, encourage self-harm, dox anyone, or make credible real-world
+threats. Wilhelmina can be vicious; she still has to be competent.
 """.strip()
 
 
 @dataclass(frozen=True)
-class VoiceChannel:
-    """A situational layer over Wilhelmina's base voice."""
+class FeatureProfile:
+    """Functional generation limits for a feature, not a separate voice."""
 
     key: str
     label: str
-    instruction: str
     fallback: str
     max_chars: int
 
 
-VOICE_CHANNELS: Mapping[str, VoiceChannel] = {
-    "guide": VoiceChannel(
-        key="guide",
-        label="Guide",
-        instruction=(
-            "Speak clearly and navigationally. Keep the elegance, but make the user's next "
-            "step obvious. This is a guide through doors, not a riddle box."
-        ),
-        fallback="Here are the doors currently willing to open.",
+FEATURE_PROFILES: Mapping[str, FeatureProfile] = {
+    "help": FeatureProfile(
+        key="help",
+        label="Help",
+        fallback="Here are the commands. Try not to injure yourself on the obvious parts.",
         max_chars=500,
     ),
-    "ritual": VoiceChannel(
-        key="ritual",
-        label="Ritual",
-        instruction=(
-            "Speak ceremonially and with gravity. Make the moment feel formal, but do not "
-            "add duties, rules, warnings, or promises that were not provided."
-        ),
-        fallback="Before you cross the threshold, read the covenant.",
+    "rules_intro": FeatureProfile(
+        key="rules_intro",
+        label="Rules intro",
+        fallback="Read the covenant. Pretending you missed it will not save you.",
         max_chars=600,
     ),
-    "administrative": VoiceChannel(
-        key="administrative",
-        label="Administrative",
-        instruction=(
-            "Speak with crisp operational clarity. A small Wilhelmina flourish is allowed, "
-            "but accuracy and brevity win."
-        ),
+    "rules_acceptance": FeatureProfile(
+        key="rules_acceptance",
+        label="Rules acceptance",
+        fallback="Recorded. You accepted the covenant.",
+        max_chars=600,
+    ),
+    "admin": FeatureProfile(
+        key="admin",
+        label="Admin",
         fallback="System status follows.",
         max_chars=400,
     ),
-    "oracle": VoiceChannel(
-        key="oracle",
-        label="Oracle",
-        instruction=(
-            "Speak symbolically and strangely, but remain readable. Suggest atmosphere, not "
-            "confusion."
-        ),
-        fallback="The candle bends toward an answer it refuses to name.",
+    "fortune": FeatureProfile(
+        key="fortune",
+        label="Fortune",
+        fallback="Your future is cloudy with a chance of regrettable confidence.",
         max_chars=600,
     ),
-    "welcome": VoiceChannel(
+    "welcome": FeatureProfile(
         key="welcome",
         label="Welcome",
-        instruction=(
-            "Speak warmly and eerily. A newcomer should feel noticed, invited, and gently "
-            "surrounded by the house."
-        ),
         fallback="Step inside. The house has already noticed you.",
         max_chars=500,
     ),
 }
 
-FEATURE_CHANNELS: Mapping[str, str] = {
-    "help": "guide",
-    "rules_intro": "ritual",
-    "rules_acceptance": "ritual",
-    "admin": "administrative",
-    "fortune": "oracle",
-    "welcome": "welcome",
-}
+DEFAULT_FEATURE_PROFILE = "help"
 
 
-def get_voice_channel(feature_key: str) -> VoiceChannel:
-    """Return the voice channel assigned to a feature."""
+def get_feature_profile(feature_key: str) -> FeatureProfile:
+    """Return the functional generation profile assigned to a feature."""
 
-    channel_key = FEATURE_CHANNELS.get(feature_key, "guide")
-    return VOICE_CHANNELS[channel_key]
+    return FEATURE_PROFILES.get(feature_key, FEATURE_PROFILES[DEFAULT_FEATURE_PROFILE])
 
 
 def fallback_for(feature_key: str) -> str:
     """Return deterministic fallback text for a feature."""
 
-    return get_voice_channel(feature_key).fallback
+    return get_feature_profile(feature_key).fallback
 
 
 def _context_lines(context: Mapping[str, object]) -> str:
@@ -115,16 +124,16 @@ def _context_lines(context: Mapping[str, object]) -> str:
 
 
 def build_prompt(*, feature_key: str, task: str, context: Mapping[str, object]) -> str:
-    """Compose Wilhelmina's base voice plus the feature-specific voice channel."""
+    """Compose Wilhelmina's base voice plus task data for one feature call."""
 
-    channel = get_voice_channel(feature_key)
+    profile = get_feature_profile(feature_key)
     return (
         f"Base voice:\n{BASE_VOICE}\n\n"
-        f"Voice channel: {channel.label}\n{channel.instruction}\n\n"
         f"Global limits:\n{GLOBAL_LIMITS}\n\n"
+        f"Feature:\n- key: {feature_key}\n- label: {profile.label}\n\n"
         f"Task:\n{task}\n\n"
         f"Context:\n{_context_lines(context)}\n\n"
-        f"Return only the user-facing Discord text. Maximum {channel.max_chars} characters."
+        f"Return only the user-facing Discord text. Maximum {profile.max_chars} characters."
     )
 
 
@@ -148,10 +157,10 @@ async def render_persona_text(
 ) -> str:
     """Generate Wilhelmina-styled text, falling back deterministically when AI is unavailable."""
 
-    channel = get_voice_channel(feature_key)
-    fallback_text = channel.fallback if fallback is None else fallback
+    profile = get_feature_profile(feature_key)
+    fallback_text = profile.fallback if fallback is None else fallback
     prompt = build_prompt(feature_key=feature_key, task=task, context=context)
     text = await generate_text_async(prompt)
     if not text:
         return fallback_text
-    return clean_persona_text(text, max_chars=channel.max_chars) or fallback_text
+    return clean_persona_text(text, max_chars=profile.max_chars) or fallback_text
