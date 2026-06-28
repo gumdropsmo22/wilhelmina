@@ -8,15 +8,15 @@ from services import help as help_service
 from services.persona import render_persona_text
 
 HELP_CATEGORY_CHOICES = [
-    app_commands.Choice(name="Core", value="core"),
+    app_commands.Choice(name="Basics", value="core"),
     app_commands.Choice(name="Divination", value="divination"),
     app_commands.Choice(name="Server", value="server"),
-    app_commands.Choice(name="Miscellany", value="misc"),
+    app_commands.Choice(name="Loose Ends", value="misc"),
 ]
 
 
 class HelpCategorySelect(discord.ui.Select):
-    """Category selector for the Living Command Grimoire."""
+    """Category selector for the Command Grimoire."""
 
     def __init__(self, view: "HelpView") -> None:
         self.grimoire_view = view
@@ -29,8 +29,8 @@ class HelpCategorySelect(discord.ui.Select):
             for category in view.categories
         ]
         if not options:
-            options = [discord.SelectOption(label="Miscellany", value="misc", default=True)]
-        super().__init__(placeholder="Choose a grimoire wing…", min_values=1, max_values=1, options=options)
+            options = [discord.SelectOption(label="Loose Ends", value="misc", default=True)]
+        super().__init__(placeholder="Choose a grimoire section…", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         self.grimoire_view.category = self.values[0]
@@ -123,12 +123,12 @@ class HelpView(discord.ui.View):
 
 
 class Help(commands.Cog):
-    """Living Command Grimoire."""
+    """Command Grimoire."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="help", description="Open Wilhelmina's living command grimoire.")
+    @app_commands.command(name="help", description="Shows available commands. Try reading before guessing.")
     @app_commands.describe(
         category="Optional grimoire category to open first.",
         public="Show the grimoire publicly instead of only to you.",
@@ -151,7 +151,7 @@ class Help(commands.Cog):
         intro = await render_persona_text(
             feature_key="help",
             task=(
-                "Write one concise opening line for Wilhelmina's dynamic command grimoire. "
+                "Write one concise opening line for Wilhelmina's command grimoire. "
                 "Do not list commands. Do not mention admin commands."
             ),
             context={
