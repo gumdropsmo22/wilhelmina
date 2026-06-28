@@ -14,7 +14,7 @@ class Fortune(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="fortune", description="Crack open a strange fortune from Wilhelmina.")
+    @app_commands.command(name="fortune", description="Produces a short omen from Wilhelmina.")
     async def fortune(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         fortune_text = await generate_fortune()
