@@ -14,13 +14,13 @@ class EightBall(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="8ball", description="Ask Wilhelmina a yes/no question.")
+    @app_commands.command(name="8ball", description="Answers a question with suspicious confidence.")
     @app_commands.describe(question="Your yes/no question for Wilhelmina.")
     async def eight_ball(self, interaction: discord.Interaction, question: str) -> None:
         if question is None or question.strip() == "":
             embed = embeds.system_embed(
                 header="▒▒ 8-BALL ▒▒",
-                description="A: Ask a question first. Even mystery needs input.",
+                description="Ask a question first. Even mystery needs input.",
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
