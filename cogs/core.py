@@ -20,7 +20,10 @@ class Core(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="about", description="About Wilhelmina.")
+    @app_commands.command(
+        name="about",
+        description="Explains what Wilhelmina is, since apparently the haunting was not clear.",
+    )
     async def about(self, interaction: discord.Interaction) -> None:
         settings = getattr(self.bot, "settings", None)
         app_env = getattr(settings, "app_env", "unknown")
@@ -34,7 +37,7 @@ class Core(commands.Cog):
         )
         await interaction.response.send_message(message, ephemeral=True)
 
-    @app_commands.command(name="uptime", description="Show bot uptime.")
+    @app_commands.command(name="uptime", description="Shows how long Wilhelmina has been awake and judging.")
     async def uptime(self, interaction: discord.Interaction) -> None:
         started = getattr(self.bot, "start_ts", time.time())
         seconds = int(time.time() - started)
