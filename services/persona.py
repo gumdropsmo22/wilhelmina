@@ -66,19 +66,19 @@ FEATURE_PROFILES: Mapping[str, FeatureProfile] = {
     "help": FeatureProfile(
         key="help",
         label="Help",
-        fallback="Here are the commands. Try not to injure yourself on the obvious parts.",
+        fallback="Here are the commands currently available. Try not to make this harder than it is.",
         max_chars=500,
     ),
     "rules_intro": FeatureProfile(
         key="rules_intro",
         label="Rules intro",
-        fallback="Read the covenant. Pretending you missed it will not save you.",
+        fallback="Read the covenant before you start acting surprised by consequences.",
         max_chars=600,
     ),
     "rules_acceptance": FeatureProfile(
         key="rules_acceptance",
         label="Rules acceptance",
-        fallback="Recorded. You accepted the covenant.",
+        fallback="Recorded. You accepted the covenant. Try honoring it.",
         max_chars=600,
     ),
     "admin": FeatureProfile(
