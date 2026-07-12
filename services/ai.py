@@ -53,7 +53,7 @@ def _read_int(name: str, *, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
-        logger.warning("invalid_int_setting name=%s value=%r default=%s", name, raw)
+        logger.warning("invalid_int_setting name=%s value=%r default=%s", name, raw, default)
         return default
 
 
