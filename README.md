@@ -23,6 +23,7 @@ cogs.invite        /invite
 cogs.roll          /roll
 cogs.eight_ball    /8ball
 cogs.fortune       /fortune
+cogs.broadcasts    /broadcast-admin ...
 ```
 
 Each optional feature has its own flag:
@@ -34,6 +35,7 @@ ENABLE_INVITE=false
 ENABLE_ROLL=false
 ENABLE_EIGHT_BALL=false
 ENABLE_FORTUNE=false
+ENABLE_BROADCASTS=false
 ```
 
 `ENABLE_ORACLES` is retained only as a temporary compatibility shim for old `.env` files. New configuration should not use it.
@@ -105,7 +107,7 @@ ENABLE_RULES=true
 
 ## SQLite persistence
 
-Wilhelmina stores dedicated-server configuration, administrative audit events, onboarding state, rules versions, and rules acceptance records in SQLite.
+Wilhelmina stores dedicated-server configuration, administrative audit events, onboarding state, rules versions, rules acceptance records, and broadcast state in SQLite.
 
 ```env
 DATABASE_PATH=data/wilhelmina.sqlite3
@@ -121,6 +123,9 @@ audit_log
 onboarding_state
 rules_versions
 rules_acceptance
+broadcast_settings
+broadcast_runs
+broadcast_text_history
 schema_migrations
 ```
 
@@ -130,7 +135,7 @@ The stored guild configuration is the source of truth for server role/channel ID
 
 `/help` opens Wilhelmina's dynamic public command grimoire. It reads the live slash-command tree, hides admin tooling, groups public commands into categories, and can show sealed future doors such as tarot, readings, rituals, welcome, and broadcast.
 
-The grimoire uses the Persona Engine's `guide` voice channel for short AI-polished intro text when `OPENAI_API_KEY` is configured. If AI is unavailable, it falls back to deterministic copy.
+The grimoire uses the Persona Engine's `help` feature profile for short AI-polished intro text when `OPENAI_API_KEY` is configured. If AI is unavailable, it falls back to deterministic copy.
 
 ## Covenant Gate rules UI
 
@@ -165,25 +170,69 @@ The `/admin config` commands are administrator-only and always respond ephemeral
 
 These commands only store, clear, validate, and audit configuration. They do **not** create roles, create channels, assign roles, onboard users, mutate permissions, schedule jobs, or transform a server.
 
-## Persona Engine
+## Scheduled Daily Broadcasts
 
-Wilhelmina now has a central Persona Engine with one base voice and feature-specific voice channels.
+`cogs.broadcasts` adds `/broadcast-admin` controls for Wilhelmina's automatic daily show system.
 
-Current voice channels:
+Segments:
 
 ```txt
-guide           /help
-ritual          /rules and rules acceptance
-oracle          /fortune
-administrative  admin/status copy hooks
-welcome         future welcome messages
+morning  The Vanguard Frequency   default 08:00 Asia/Riyadh
+evening  W.W.N. Broadcast          default 21:30 Asia/Riyadh
 ```
 
-This keeps Wilhelmina recognizable while allowing each feature to speak through the right channel. The old umbrella oracle/persona architecture remains removed.
+Admin commands:
+
+```txt
+/broadcast-admin status
+/broadcast-admin preview
+/broadcast-admin send-test
+/broadcast-admin enable
+/broadcast-admin disable
+/broadcast-admin set-channel
+/broadcast-admin set-time
+/broadcast-admin set-timezone
+```
+
+Broadcasts are disabled by default. The system stores schedule settings, run history, idempotency keys, and text-history hashes in SQLite. Until final news and astronomy providers are configured, previews and test sends use deterministic fallback copy and scheduled runs skip posting rather than inventing headlines or sky data.
+
+Recommended first setup:
+
+```env
+ENABLE_BROADCASTS=true
+```
+
+Then run:
+
+```txt
+/broadcast-admin set-channel target:default channel:#your-channel
+/broadcast-admin preview segment:morning
+/broadcast-admin send-test segment:evening
+/broadcast-admin enable segment:all
+```
+
+## Persona Engine
+
+Wilhelmina has a central Persona Engine with one base voice and feature-specific **feature profiles**.
+
+Current feature profiles:
+
+```txt
+help                 /help
+rules_intro          /rules intro copy
+rules_acceptance     rules acceptance copy
+admin                admin/status copy hooks
+fortune              /fortune
+welcome              future welcome messages
+broadcast_morning    The Vanguard Frequency generation
+broadcast_evening    W.W.N. Broadcast generation
+```
+
+This keeps Wilhelmina recognizable while allowing each feature to apply the right functional limits. The old umbrella oracle/persona architecture remains removed.
 
 ## AI-backed features
 
-`/8ball`, `/fortune`, `/help`, and `/rules` can use AI first when `OPENAI_API_KEY` is configured, then fall back to static or stored responses if AI is unavailable.
+`/8ball`, `/fortune`, `/help`, `/rules`, and `/broadcast-admin preview/send-test` can use AI first when `OPENAI_API_KEY` is configured, then fall back to static or stored responses if AI is unavailable.
 
 ```env
 OPENAI_API_KEY=
@@ -225,6 +274,5 @@ ENABLE_INVITE=false
 ENABLE_ROLL=false
 ENABLE_EIGHT_BALL=false
 ENABLE_FORTUNE=false
+ENABLE_BROADCASTS=false
 ```
-
-Required cogs fail startup when broken. Optional cogs are logged and skipped so unfinished features do not take down the runtime.
