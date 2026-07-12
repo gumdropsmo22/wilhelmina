@@ -99,6 +99,18 @@ FEATURE_PROFILES: Mapping[str, FeatureProfile] = {
         fallback="Step inside. The house has already noticed you.",
         max_chars=500,
     ),
+    "broadcast_morning": FeatureProfile(
+        key="broadcast_morning",
+        label="Morning broadcast",
+        fallback="The Vanguard Frequency is standing by, but the source feed is not. Facts first; spectacle later.",
+        max_chars=1900,
+    ),
+    "broadcast_evening": FeatureProfile(
+        key="broadcast_evening",
+        label="Evening broadcast",
+        fallback="Witch Watch Network is silent until verified sources arrive. The void may improvise; Wilhelmina will not.",
+        max_chars=1900,
+    ),
 }
 
 DEFAULT_FEATURE_PROFILE = "help"
