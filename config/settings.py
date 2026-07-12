@@ -103,6 +103,12 @@ COG_FLAGS: tuple[CogFlag, ...] = (
         default_enabled=False,
         description="Fortune-cookie style generated message command.",
     ),
+    CogFlag(
+        extension="cogs.broadcasts",
+        env_var="ENABLE_BROADCASTS",
+        default_enabled=False,
+        description="Scheduled Daily Broadcasts: morning show and evening dispatch.",
+    ),
 )
 
 
@@ -330,6 +336,7 @@ ENABLE_INVITE = _get_bool_or_default("ENABLE_INVITE", default=False)
 ENABLE_ROLL = _get_bool_or_default("ENABLE_ROLL", default=False)
 ENABLE_EIGHT_BALL = _get_bool_or_default("ENABLE_EIGHT_BALL", default=False)
 ENABLE_FORTUNE = _get_bool_or_default("ENABLE_FORTUNE", default=False)
+ENABLE_BROADCASTS = _get_bool_or_default("ENABLE_BROADCASTS", default=False)
 
 # Legacy flag retained only as a compatibility shim. Do not use for new configuration.
 ENABLE_ORACLES = _get_bool_or_default("ENABLE_ORACLES", default=False)
