@@ -53,7 +53,7 @@ def _read_int(name: str, *, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
-        logger.warning("invalid_int_setting name=%s value=%r default=%s", name, raw, default)
+        logger.warning("invalid_int_setting name=%s value=%r default=%s", name, raw)
         return default
 
 
@@ -86,7 +86,12 @@ def ai_available() -> bool:
     return _get_openai_client() is not None
 
 
-def generate_text(prompt: str, *, config: AIConfig | None = None) -> str:
+def generate_text(
+    prompt: str,
+    *,
+    config: AIConfig | None = None,
+    preserve_newlines: bool = False,
+) -> str:
     """Generate text synchronously, returning an empty string on failure."""
 
     client = _get_openai_client()
@@ -103,6 +108,8 @@ def generate_text(prompt: str, *, config: AIConfig | None = None) -> str:
                 timeout=config.timeout_seconds,
             )
             text = response.output_text.strip()
+            if preserve_newlines:
+                return text
             return text.replace("\n", " ")
         except Exception:
             logger.exception(
@@ -115,7 +122,19 @@ def generate_text(prompt: str, *, config: AIConfig | None = None) -> str:
     return ""
 
 
+def generate_markdown(prompt: str, *, config: AIConfig | None = None) -> str:
+    """Generate Discord markdown while preserving line breaks."""
+
+    return generate_text(prompt, config=config, preserve_newlines=True)
+
+
 async def generate_text_async(prompt: str, *, config: AIConfig | None = None) -> str:
     """Run AI generation without blocking Discord's event loop."""
 
     return await asyncio.to_thread(generate_text, prompt, config=config)
+
+
+async def generate_markdown_async(prompt: str, *, config: AIConfig | None = None) -> str:
+    """Run markdown generation without blocking Discord's event loop."""
+
+    return await asyncio.to_thread(generate_markdown, prompt, config=config)
