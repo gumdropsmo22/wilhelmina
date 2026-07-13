@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from services import audit_log, broadcasts, guild_config
+from services import audit_log, broadcast_sources, broadcasts, guild_config
 from services.database import initialize_database, managed_connection
 
 logger = logging.getLogger("wilhelmina.broadcasts")
@@ -188,9 +188,14 @@ class BroadcastAdmin(commands.GroupCog, group_name="broadcast-admin"):
         guild_id: int,
         settings: broadcasts.BroadcastSettings,
         segment: str,
+        *,
+        evidence: broadcasts.BroadcastEvidence | None = None,
     ) -> broadcasts.BroadcastDraft:
         database_path = self._database_path()
-        evidence = broadcasts.build_empty_evidence(settings, segment)
+        evidence = evidence or await broadcast_sources.collect_broadcast_evidence_async(
+            settings,
+            segment,
+        )
         initialize_database(database_path)
         with managed_connection(database_path) as connection:
             recent_hashes = broadcasts.list_recent_text_hashes(connection, guild_id, segment)
@@ -251,14 +256,14 @@ class BroadcastAdmin(commands.GroupCog, group_name="broadcast-admin"):
         if run is None:
             return
 
-        evidence = broadcasts.build_empty_evidence(settings, segment, now=now)
-        if not broadcasts.has_publishable_evidence(evidence):
+        evidence = await broadcast_sources.collect_broadcast_evidence_async(settings, segment, now=now)
+        if not evidence.news_items or evidence.sky_packet.status != "ready":
             with managed_connection(database_path) as connection:
                 broadcasts.record_broadcast_run_result(
                     connection,
                     run.id,
                     status="skipped",
-                    error_code="no_verified_sources",
+                    error_code="missing_required_sources",
                 )
             return
 
@@ -273,7 +278,7 @@ class BroadcastAdmin(commands.GroupCog, group_name="broadcast-admin"):
                 )
             return
 
-        draft = await self._build_draft(guild_id, settings, segment)
+        draft = await self._build_draft(guild_id, settings, segment, evidence=evidence)
         try:
             message = await channel.send(draft.content)
         except discord.DiscordException:
