@@ -41,7 +41,14 @@ CLOSING INCANTATION
 
 The scheduler checks the configured home guild once per minute. When a segment's local time matches the configured `HH:MM`, the cog claims a scheduled run for that guild, segment, and local date. The unique scheduled-run key prevents duplicate posts after restarts or repeated ticks.
 
-If no verified providers are configured, scheduled runs are marked `skipped` with `no_verified_sources`. Preview and test commands still render deterministic fallback copy so admins can test the Discord surface safely.
+Scheduled runs require both:
+
+```txt
+at least one verified news headline
+ready Riyadh sky data
+```
+
+If those are missing, the run is marked `skipped` with `missing_required_sources`. Preview and test commands still render deterministic fallback copy so admins can test the Discord surface safely.
 
 ## Storage
 
@@ -72,25 +79,26 @@ broadcast_text_history
 /broadcast-admin set-timezone timezone:Asia/Riyadh
 ```
 
-## Provider layer
+## Source adapters
 
-The implementation currently keeps provider choice abstract. The expected source layer is:
+The source layer currently supports generic RSS/Atom feeds plus computed moon data for Riyadh.
 
-```txt
-news provider       -> normalized Article records
-astronomy provider  -> normalized Article records
-sky provider        -> normalized SkyPacket for Riyadh
+Environment variables:
+
+```env
+BROADCAST_NEWS_RSS_URLS=
+BROADCAST_ASTRONOMY_RSS_URLS=
+BROADCAST_NEWS_MAX_ITEMS=4
+BROADCAST_ASTRONOMY_MAX_ITEMS=2
+BROADCAST_SOURCE_TIMEOUT_SECONDS=10
 ```
 
-Until providers are wired, Wilhelmina refuses to invent facts. That is deliberate. A silent source is better than a confident lie in eyeliner.
+`BROADCAST_NEWS_RSS_URLS` and `BROADCAST_ASTRONOMY_RSS_URLS` are comma-separated. Feed items are normalized into `Article` evidence records, category-filtered, then passed into the generation prompt.
 
-## Future provider candidates
+The sky adapter computes the current moon phase and illumination for the configured timezone. It does not invent meteor showers, eclipses, or planetary visibility; those are only added when an astronomy feed reports them.
 
-The source layer is ready for adapters such as:
+## Provider policy
 
-- Guardian Open Platform for editorial/news source material
-- GNews or NewsAPI for broader headline aggregation
-- NASA RSS feeds for astronomy bulletins
-- Skyfield/JPL or an astronomy API for Riyadh sky-state data
+Wilhelmina may style, analyze, and mock the evidence. She may not create the evidence. Missing source data must result in omission, fallback, or skipped scheduled runs.
 
-Final provider selection remains TBA.
+Future provider adapters can be added behind the same source interface without changing the broadcast scheduler or command surface.
