@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 DEFAULT_DATABASE_PATH = Path("data/wilhelmina.sqlite3")
 
 SCHEMA_STATEMENTS: tuple[str, ...] = (
@@ -109,6 +109,67 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     """
     CREATE INDEX IF NOT EXISTS idx_rules_acceptance_guild_user
     ON rules_acceptance (guild_id, user_id, accepted_at DESC)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS broadcast_settings (
+        guild_id INTEGER PRIMARY KEY,
+        default_channel_id INTEGER,
+        morning_channel_id INTEGER,
+        evening_channel_id INTEGER,
+        timezone TEXT NOT NULL DEFAULT 'Asia/Riyadh',
+        morning_enabled INTEGER NOT NULL DEFAULT 0 CHECK (morning_enabled IN (0, 1)),
+        evening_enabled INTEGER NOT NULL DEFAULT 0 CHECK (evening_enabled IN (0, 1)),
+        morning_time TEXT NOT NULL DEFAULT '08:00',
+        evening_time TEXT NOT NULL DEFAULT '21:30',
+        news_provider TEXT NOT NULL DEFAULT 'tba',
+        astronomy_provider TEXT NOT NULL DEFAULT 'tba',
+        sky_provider TEXT NOT NULL DEFAULT 'tba',
+        morning_categories TEXT NOT NULL DEFAULT 'labor,economics,corporate,geopolitics',
+        evening_categories TEXT NOT NULL DEFAULT 'corporate,environment,politics,world',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS broadcast_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER NOT NULL,
+        segment TEXT NOT NULL CHECK (segment IN ('morning', 'evening')),
+        run_type TEXT NOT NULL CHECK (run_type IN ('scheduled', 'test')),
+        logical_date TEXT NOT NULL,
+        scheduled_for TEXT,
+        status TEXT NOT NULL,
+        message_id INTEGER,
+        fallback_used INTEGER NOT NULL DEFAULT 0 CHECK (fallback_used IN (0, 1)),
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_broadcast_runs_scheduled_unique
+    ON broadcast_runs (guild_id, segment, logical_date)
+    WHERE run_type = 'scheduled'
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_broadcast_runs_guild_created
+    ON broadcast_runs (guild_id, created_at DESC)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS broadcast_text_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER NOT NULL,
+        segment TEXT NOT NULL CHECK (segment IN ('morning', 'evening')),
+        logical_date TEXT NOT NULL,
+        opener_hash TEXT NOT NULL,
+        closer_hash TEXT NOT NULL,
+        full_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_broadcast_text_history_lookup
+    ON broadcast_text_history (guild_id, segment, created_at DESC)
     """,
 )
 
