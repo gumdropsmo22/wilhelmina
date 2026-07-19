@@ -9,6 +9,7 @@ from discord.ext import commands
 from config.settings import RuntimeSettings, SettingsError, load_settings
 
 logger = logging.getLogger("wilhelmina")
+REGISTRY_EXTENSION = "cogs.coven_registry"
 
 
 def configure_logging(level_name: str) -> None:
@@ -25,6 +26,8 @@ def build_intents(settings: RuntimeSettings) -> discord.Intents:
     """Build Discord gateway intents from enabled features."""
 
     intents = discord.Intents.default()
+    if settings.is_cog_enabled("cogs.rules"):
+        intents.members = True
     return intents
 
 
@@ -86,6 +89,19 @@ async def load_cogs(bot: commands.Bot, settings: RuntimeSettings) -> dict[str, l
                 flag.required,
             )
 
+    if settings.is_cog_enabled("cogs.rules"):
+        try:
+            await bot.load_extension(REGISTRY_EXTENSION)
+        except commands.ExtensionAlreadyLoaded:
+            report["loaded"].append(REGISTRY_EXTENSION)
+        except Exception:
+            report["failed"].append(REGISTRY_EXTENSION)
+            logger.exception("cog_load_failed extension=%s", REGISTRY_EXTENSION)
+            raise
+        else:
+            report["loaded"].append(REGISTRY_EXTENSION)
+            logger.info("cog_loaded extension=%s", REGISTRY_EXTENSION)
+
     return report
 
 
@@ -104,7 +120,6 @@ async def sync_application_commands(bot: commands.Bot, settings: RuntimeSettings
     if mode == "guild":
         if settings.home_guild_id is None:
             raise SettingsError("HOME_GUILD_ID is required for guild command sync")
-
         guild = discord.Object(id=settings.home_guild_id)
         bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
