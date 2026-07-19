@@ -47,7 +47,11 @@ class CovenRegistry(commands.GroupCog, group_name="registry"):
         self.bot = bot
 
     @app_commands.command(name="index", description="Open the public Coven Registry index.")
-    async def index(self, interaction: discord.Interaction, page: app_commands.Range[int, 1, 999] = 1) -> None:
+    async def index(
+        self,
+        interaction: discord.Interaction,
+        page: app_commands.Range[int, 1, 999] = 1,
+    ) -> None:
         guild_id = await guard_home(interaction, self.bot)
         if guild_id is None:
             return
@@ -62,7 +66,9 @@ class CovenRegistry(commands.GroupCog, group_name="registry"):
                 limit=PAGE_SIZE,
                 offset=(page - 1) * PAGE_SIZE,
             )
-        await interaction.response.send_message(embed=views.index_card(entries, page=page, pages=pages, total=total))
+        await interaction.response.send_message(
+            embed=views.index_card(entries, page=page, pages=pages, total=total)
+        )
 
     @app_commands.command(name="me", description="Show your public Coven Registry card.")
     async def me(self, interaction: discord.Interaction) -> None:
@@ -78,7 +84,10 @@ class CovenRegistry(commands.GroupCog, group_name="registry"):
                 required=False,
             )
         if entry is None:
-            await interaction.response.send_message("You are not recorded in the Coven Registry yet.", ephemeral=True)
+            await interaction.response.send_message(
+                "You are not recorded in the Coven Registry yet.",
+                ephemeral=True,
+            )
             return
         await interaction.response.send_message(embed=views.public_card(entry), ephemeral=True)
 
@@ -106,9 +115,17 @@ class CovenRegistryEvents(commands.Cog):
                     actor_user_id=member.id,
                 )
         except registry.RegistryNotBootstrapped:
-            logger.warning("registry_join_skipped_unbootstrapped guild_id=%s user_id=%s", member.guild.id, member.id)
+            logger.warning(
+                "registry_join_skipped_unbootstrapped guild_id=%s user_id=%s",
+                member.guild.id,
+                member.id,
+            )
         except Exception:
-            logger.exception("registry_join_failed guild_id=%s user_id=%s", member.guild.id, member.id)
+            logger.exception(
+                "registry_join_failed guild_id=%s user_id=%s",
+                member.guild.id,
+                member.id,
+            )
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
@@ -125,7 +142,11 @@ class CovenRegistryEvents(commands.Cog):
                     actor_user_id=actor,
                 )
         except Exception:
-            logger.exception("registry_archive_failed guild_id=%s user_id=%s", member.guild.id, member.id)
+            logger.exception(
+                "registry_archive_failed guild_id=%s user_id=%s",
+                member.guild.id,
+                member.id,
+            )
 
     async def induct_from_covenant(
         self,
@@ -163,7 +184,11 @@ class CovenRegistryEvents(commands.Cog):
                 )
                 settings = registry.get_settings(connection, member.guild.id)
         except registry.RegistryNotBootstrapped:
-            logger.warning("registry_induction_skipped_unbootstrapped guild_id=%s user_id=%s", member.guild.id, member.id)
+            logger.warning(
+                "registry_induction_skipped_unbootstrapped guild_id=%s user_id=%s",
+                member.guild.id,
+                member.id,
+            )
             return None
         if not result.notice_required or settings is None or settings.public_channel_id is None:
             return result
@@ -181,7 +206,38 @@ class CovenRegistryEvents(commands.Cog):
         return result
 
 
+def _install_rules_bridge(bot: commands.Bot, events: CovenRegistryEvents) -> None:
+    """Bridge Covenant Gate acceptance without coupling its cog to Registry internals."""
+
+    from services import rules as rules_service
+
+    current = rules_service.accept_rules_version
+    if getattr(current, "__registry_bridge__", False):
+        return
+
+    def bridged_accept_rules_version(*args, **kwargs):
+        result = current(*args, **kwargs)
+        guild_id = int(kwargs["guild_id"])
+        user_id = int(kwargs["user_id"])
+        guild = bot.get_guild(guild_id)
+        member = guild.get_member(user_id) if guild else None
+        if member is not None:
+            bot.loop.create_task(
+                events.induct_from_covenant(
+                    member=member,
+                    rules_version_id=result.acceptance.rules_version_id,
+                    accepted_at=result.acceptance.accepted_at,
+                )
+            )
+        return result
+
+    bridged_accept_rules_version.__registry_bridge__ = True
+    rules_service.accept_rules_version = bridged_accept_rules_version
+
+
 async def setup(bot: commands.Bot) -> None:
+    events = CovenRegistryEvents(bot)
     await bot.add_cog(CovenRegistry(bot))
     await bot.add_cog(CovenRegistryAdmin(bot))
-    await bot.add_cog(CovenRegistryEvents(bot))
+    await bot.add_cog(events)
+    _install_rules_bridge(bot, events)
