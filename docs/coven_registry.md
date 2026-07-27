@@ -38,7 +38,7 @@ Public commands expose only the Coven Mark, display name, classification, status
 
 Administrator commands expose the full operational file: Discord user ID, Registry number, join/departure timestamps, covenant version linkage, notice message ID, and persistence timestamps.
 
-The profile shell contains no inferred traits, conversation surveillance, personality judgments, likes, dislikes, or automatic notes. Future memory must be designed as a separate layer with review and deletion controls.
+The profile shell itself contains no inferred traits, conversation surveillance, personality judgments, likes, dislikes, or automatic notes. The separate [Memory Ledger](memory_ledger.md) defines the private memory layer, its administration controls, receipts, deletion behavior, and reveal boundary.
 
 ## Commands
 
