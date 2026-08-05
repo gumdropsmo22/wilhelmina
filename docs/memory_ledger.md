@@ -2,7 +2,7 @@
 
 The Memory Ledger is Wilhelmina's private, persistent record of what human members say in the home Discord server. It extends the Coven Registry profile shell without making member profiles public.
 
-This document is the implementation contract for the first Memory Ledger build. Manual Discord testing remains deferred until the project's final live-testing pass.
+This document is the implementation contract for the Memory Ledger. Manual Discord testing remains deferred until the project's final live-testing pass.
 
 ## Product rules
 
@@ -12,22 +12,24 @@ This document is the implementation contract for the first Memory Ledger build. 
 - Wilhelmina may collect from any guild channel she can read.
 - Direct messages are excluded.
 - Only human-authored Discord messages are eligible.
-- Bot messages, webhook messages, and automated integration output are ignored.
+- Bot messages, webhook messages, and automated integrations are ignored.
 - Only message text is analyzed.
-- Images, audio, video, uploaded files, and the contents of external links are not inspected.
-- Collection is silent. Wilhelmina does not react, reply, or notify members when a memory is saved.
+- Images, audio, video, uploaded files, and external-link contents are not inspected.
+- Collection is silent.
+- Collection is controlled globally by the founder/admin. There is no member-level opt-out in the approved design.
+- The legacy `coven_profile_shells.memory_opt_out` column is inert compatibility data and must not alter collection.
 
 ### Ownership and visibility
 
 - Each memory belongs to the Coven Registry profile of the human member who supplied it.
-- Third-party gossip does not create a standalone profile for the person being discussed. It remains attached to the member who submitted it.
-- Raw Memory Ledger records, receipts, searches, status output, and administration commands are visible only to the founder/admin.
+- Third-party gossip does not create a standalone profile for the person being discussed.
+- Raw records, receipts, searches, status output, and administration commands are visible only to the founder/admin.
 - Admin command responses must be ephemeral wherever Discord permits it.
-- Memories may later feed approved Wilhelmina features, but that does not make the raw ledger public.
+- Memories may feed later approved Wilhelmina features without making the raw ledger public.
 
-### Categories
+### Categories and labels
 
-The initial category set is:
+Categories:
 
 - `Identity`
 - `Preference`
@@ -42,21 +44,21 @@ The initial category set is:
 - `Wilhelmina impression`
 - `Gossip`
 
-Every automatically extracted record also carries one epistemic label:
+Epistemic labels:
 
 - `Fact`
 - `Inference`
 - `Impression`
 - `Gossip`
 
-Gossip must be presented internally as `Unverified gossip`. Accusations are stored as attributed claims, never as established facts.
+Gossip is presented internally as `Unverified gossip`. Accusations are stored as attributed claims, never established facts.
 
-### Information that must never be saved
+### Prohibited information
 
-The Ledger must reject or redact:
+The Ledger must reject or redact the following before any external AI request and before persistence:
 
 - passwords;
-- access tokens;
+- access tokens and API keys;
 - login credentials;
 - exact residential addresses;
 - banking or payment information;
@@ -65,101 +67,100 @@ The Ledger must reject or redact:
 - mental-health diagnoses;
 - private-message content.
 
-Explicit self-identification, reclaimed in-group language, inferred traits, gossip, accusations, and third-party information are otherwise allowed under the rules above.
+The future event listener must call the deterministic pre-extraction validator before sending text to the OpenAI extractor. If the validator rejects a message, no external request is made and no memory is created.
 
 ## Memory records
 
 A memory record stores:
 
 - guild ID;
-- owner user ID;
-- Coven Mark linkage;
+- owner user ID linked to a Coven Registry profile shell;
 - category;
 - epistemic label;
 - concise summary;
-- normalized topic key for duplicate and contradiction handling;
-- optional subject text for gossip or relationship context;
+- normalized duplicate key;
+- normalized topic key;
+- gossip marker;
 - active status;
-- first-seen timestamp;
-- last-confirmed timestamp;
-- created and updated timestamps.
+- creator ID;
+- created, updated, and last-confirmed timestamps.
 
-The active profile is permanent until an administrator edits, replaces, or deletes a record. Nothing expires automatically.
+Nothing expires automatically.
 
 ## Receipts
 
-Every memory must have at least one receipt. A receipt stores:
+Every memory has at least one receipt.
 
+### Discord receipt
+
+A Discord-derived receipt stores:
+
+- source kind `discord`;
 - message ID;
-- Discord jump URL;
+- jump URL;
 - author user ID;
 - channel ID;
 - original message timestamp;
 - original excerpt;
-- latest edited excerpt;
-- edit timestamp when applicable;
-- whether the source message was later deleted;
-- receipt creation and update timestamps.
+- latest edited excerpt and edit timestamp when applicable;
+- source-deletion timestamp when applicable.
 
-The Ledger preserves the original excerpt and the edited excerpt. If Discord later deletes the source message, the receipt remains and is marked `source deleted`.
+### Admin receipt
+
+An admin-authored memory uses source kind `admin` and stores:
+
+- administrator user ID;
+- the memory summary as the source excerpt;
+- creation timestamp;
+- no fabricated Discord message, channel, or jump URL.
+
+If Discord later deletes a source message, its stored receipt remains and is marked deleted.
 
 ## Duplicate and contradiction behavior
 
 ### Duplicate memories
 
-When a new message repeats an existing memory:
+A repeated memory keeps one record, adds another receipt, preserves every supporting link, and updates `last_confirmed_at`.
 
-- keep one memory record;
-- add the new receipt;
-- preserve all supporting message links;
-- update `last_confirmed_at`;
-- do not create a second copy.
+### Ordinary replacement
 
-### Normal contradictions
+For non-gossip records, a newer statement in the same replacement category permanently deletes the superseded record and its receipts before creating the new record.
 
-For non-gossip records, a newer statement replaces the older active memory. The older memory content is permanently deleted. A minimal audit event may record that a replacement occurred, but it must not preserve the deleted content.
+A minimal `memory.replaced` audit event may remain, but it stores no deleted memory content.
 
 ### Gossip contradictions
 
-Conflicting gossip from different speakers remains as separate, attributed claims. Records sharing a topic key may be linked as contradictory without merging their claims.
+Conflicting gossip remains as separate attributed claims. Records sharing a topic key are linked in `memory_contradictions`.
 
-Wilhelmina's future chat behavior is intentionally less formal than the storage model:
+Both contradiction foreign keys use `ON DELETE CASCADE`, so permanently deleting either memory also removes the relationship row.
 
-- if the contradiction occurs inside the designated Wilhelmina chat channel, she may call it out immediately;
-- if it occurs elsewhere, she stores it silently and may bring it up the next time the subject appears in the designated chat channel;
-- dialogue should sound conversational, messy, and instigating rather than like a tribunal or case-management system.
+Future chat behavior:
+
+- contradictions observed inside the designated Wilhelmina chat may be called out immediately;
+- contradictions observed elsewhere are stored silently and may be raised later in the designated chat;
+- dialogue should sound conversational and messy rather than judicial.
 
 ## Collection controls
 
-The Ledger has a persistent guild-level state:
+The Ledger stores a persistent guild-level state:
 
-- `active`;
-- `paused`.
+- active;
+- paused.
 
-Admin controls must support:
-
-- pause collection;
-- resume collection;
-- report current status.
-
-The state survives process restarts and Discord reconnections. Pausing collection does not delete or alter existing memories.
+Admin controls will support pause, resume, status, and designated-chat-channel configuration. The state survives process restarts and Discord reconnections. Pausing does not delete existing memories.
 
 ## Designated Wilhelmina chat channel
 
 Exactly one guild channel may be configured as Wilhelmina's conversation channel.
 
-- The Ledger collects from every readable guild channel.
+- Collection may occur in every readable guild channel.
 - Open use of memories is limited to the designated Wilhelmina chat channel.
-- Outside that channel, Wilhelmina may collect memories but must not reveal or weaponize them in conversation.
-- The full active profile for participating members is loaded for every future Wilhelmina chat response.
-- No profile compression or artificial limit is planned for the initial single-digit, low-activity server.
-- A technical overflow safeguard may be added later only if model context limits are reached.
+- Outside that channel, Wilhelmina may collect but must not reveal memories.
+- The full active profile is loaded for future Wilhelmina chat responses.
 
 ## Administration surface
 
-The first command group should be `/memory-admin` and remain founder/admin only.
-
-Recommended commands:
+The planned founder/admin-only command group is `/memory-admin`:
 
 ```text
 /memory-admin status
@@ -174,81 +175,31 @@ Recommended commands:
 /memory-admin receipt
 ```
 
-Expected behavior:
+All responses are private/ephemeral where Discord permits it.
 
-- `status` reports collection state, configured chat channel, record count, receipt count, and last collection error.
-- `profile` shows the full active memory file for one member.
-- `search` filters by member, category, label, subject, or text.
-- `add` creates an admin-authored record with an `Admin note` default category unless another category is chosen.
-- `edit` may change category, label, summary, subject, and normalized topic.
-- `delete` permanently erases the memory and its receipts, leaving only a content-free audit event.
-- `receipt` displays the stored source excerpt and jump link.
-
-## Proposed SQLite schema
-
-The implementation should add schema version 6 and create the following tables.
+## SQLite schema version 6
 
 ### `memory_ledger_settings`
 
-- `guild_id` primary key;
-- `collection_enabled` boolean, default true;
-- `chat_channel_id` nullable;
-- `last_error_code` nullable;
-- `last_error_at` nullable;
-- `created_at`;
-- `updated_at`.
+Stores guild collection state and the designated Wilhelmina channel.
 
 ### `memory_records`
 
-- `id` integer primary key;
-- `guild_id`;
-- `owner_user_id`;
-- `category`;
-- `epistemic_label`;
-- `summary`;
-- `topic_key`;
-- `subject_text` nullable;
-- `is_active` boolean;
-- `first_seen_at`;
-- `last_confirmed_at`;
-- `created_at`;
-- `updated_at`;
-- foreign key to `coven_profile_shells (guild_id, user_id)` with cascade deletion;
-- unique active duplicate key scoped to guild, owner, category, epistemic label, and topic key.
+Stores memory content and links `(guild_id, subject_user_id)` to `coven_profile_shells` with cascade deletion.
 
 ### `memory_receipts`
 
-- `id` integer primary key;
-- `memory_id` foreign key with cascade deletion;
-- `guild_id`;
-- `message_id`;
-- `channel_id`;
-- `author_user_id`;
-- `jump_url`;
-- `source_created_at`;
-- `source_edited_at` nullable;
-- `original_excerpt`;
-- `latest_excerpt`;
-- `source_deleted` boolean;
-- `created_at`;
-- `updated_at`;
-- unique key on memory ID and message ID.
+Stores either a `discord` source or an `admin` source. Receipts cascade when their memory is deleted.
 
 ### `memory_contradictions`
 
-- `id` integer primary key;
-- `guild_id`;
-- `left_memory_id`;
-- `right_memory_id`;
-- `topic_key`;
-- `created_at`;
-- unique unordered pair constraint enforced by normalized IDs in service code.
+Stores normalized unordered gossip-memory pairs. Both memory references cascade on deletion.
+
+`initialize_memory_schema()` initializes its Coven Registry dependency first, applies all Memory Ledger tables and indexes idempotently, and records schema version 6.
 
 ## Extraction contract
 
-Automatic extraction should use the existing AI service asynchronously and require strict JSON output. One Discord message may yield zero or more candidates.
-
-Each candidate must contain:
+Automatic extraction is a later tranche and will require strict structured output. One message may yield zero or more candidates:
 
 ```json
 {
@@ -256,121 +207,79 @@ Each candidate must contain:
   "epistemic_label": "Fact",
   "summary": "Prefers iced coffee",
   "topic_key": "drink.preference.coffee.temperature",
-  "subject_text": null,
   "relationship": "new|duplicate|replacement|contradictory_gossip",
   "existing_memory_id": null
 }
 ```
 
-Before persistence, deterministic validation must:
+Processing order is mandatory:
 
-- reject unknown categories and labels;
-- reject empty summaries or topic keys;
-- enforce length limits;
-- block prohibited information;
-- ensure gossip is labeled as gossip;
-- ensure accusations are phrased as attributed claims;
-- ignore AI output that cannot be parsed safely.
+1. reject DMs, bots, webhooks, empty text, and paused guilds;
+2. confirm a Coven Registry profile shell exists;
+3. run deterministic prohibited-information validation locally;
+4. only then send allowed text and current profile context to the extractor;
+5. validate the returned structure;
+6. merge duplicates, permanently replace ordinary memories, or preserve/link gossip contradictions;
+7. create the appropriate receipt.
 
-AI failure must never block Discord event handling. On extraction failure, the message is skipped, an operational error is logged, and no speculative memory is created.
+AI failure never blocks Discord event handling. Failed extraction creates no speculative memory.
 
-## Message-event flow
-
-### New message
-
-1. Reject DMs, bots, webhooks, empty text, and disabled or paused guilds.
-2. Confirm the author has a Coven Registry entry and profile shell.
-3. Send text plus the author's current active profile to the extractor.
-4. Validate candidates deterministically.
-5. Merge duplicates, replace normal contradictions, or preserve contradictory gossip.
-6. Create receipts and write content-free audit events for admin mutations or permanent deletion.
+## Message edits and deletions
 
 ### Edited message
 
-1. Locate receipts by message ID.
-2. Preserve the original excerpt.
-3. Update the latest excerpt and edit timestamp.
-4. Re-run extraction against the edited text.
-5. Reconcile memories created from that message without erasing receipts from unrelated messages.
+- preserve the original excerpt;
+- store the latest excerpt and edit timestamp;
+- validate the edited text before any future re-extraction;
+- reconcile only records connected to that source message.
 
 ### Deleted message
 
-1. Locate receipts by message ID.
-2. Mark them `source_deleted = true`.
-3. Keep the stored excerpts and memory records.
-4. Do not attempt to reconstruct content that was never captured.
+- mark matching Discord receipts as source deleted;
+- keep stored excerpts and memories;
+- do not reconstruct content that was never captured.
 
-## Prompt-loading interface
-
-The Ledger service should expose a deterministic formatter for future open chat, for example:
-
-```python
-render_full_profile_context(connection, guild_id=..., user_ids=[...]) -> str
-```
-
-The formatter should include categories, labels, summaries, subjects, confirmation dates, and contradiction markers. It should not include raw receipts unless a future prompt explicitly needs them.
-
-Open-chat integration is a later feature. The Memory Ledger build should provide the interface without inventing the chat system inside this PR.
-
-## Build order
+## Build status and order
 
 ### Phase 1 — Persistence foundation
 
+Implemented in PR #33:
+
 - schema version 6;
-- settings, record, receipt, and contradiction dataclasses;
-- CRUD and query service;
-- duplicate merge;
-- normal replacement;
-- gossip contradiction preservation;
-- permanent deletion with content-free audit event;
-- profile-context formatter;
-- unit tests.
+- settings, records, receipts, and contradiction relationships;
+- duplicate merging;
+- permanent ordinary replacement;
+- gossip preservation and contradiction links;
+- admin and Discord receipt variants;
+- permanent deletion with content-free audit events;
+- pre-extraction prohibited-content validation;
+- profile rendering;
+- automated tests.
 
 ### Phase 2 — Admin controls
 
 - feature flag;
-- ephemeral `/memory-admin` group;
-- status, pause, resume, channel, profile, search, add, edit, delete, and receipt commands;
+- ephemeral `/memory-admin` commands;
+- status, pause, resume, channel, profile, search, add, edit, delete, and receipt operations;
 - founder/admin authorization tests;
-- documentation and environment updates.
+- README and `.env.example` updates.
 
 ### Phase 3 — Automatic collection
 
-- message-content intent when the feature is enabled;
-- AI extraction prompt and strict parser;
-- new-message listener;
-- edit and delete listeners;
-- bot/webhook/DM/text-only filters;
-- failure logging and rate-control tests.
+- Message Content Intent when enabled;
+- shared OpenAI client and strict extractor;
+- new, edit, and delete message listeners;
+- human/guild/text-only filters;
+- pre-AI prohibited-data filtering;
+- failure logging and rate controls.
 
 ### Phase 4 — Open-chat bridge
 
-- load the full active profile for relevant participants;
-- enforce the one-channel reveal boundary;
-- immediate contradiction callouts inside the chat channel;
-- deferred contradiction use when contradictions are observed elsewhere;
-- conversational Wilhelmina behavior rather than formal dispute language.
-
-## Test requirements
-
-The automated suite must cover at least:
-
-- idempotent schema initialization;
-- persistent pause/resume state;
-- no history-import path;
-- human-only and guild-only filters;
-- duplicate merge with multiple receipts;
-- newer normal memory replacing older content;
-- contradictory gossip remaining separate and attributed;
-- edited receipt preserving original and latest excerpts;
-- deleted source retaining excerpts and marking deletion;
-- permanent admin deletion removing records and receipts;
-- content-free audit deletion event;
-- prohibited-information rejection;
-- admin-only ephemeral command behavior;
-- full-profile prompt formatting;
-- collection from readable channels while reveal remains restricted to the designated chat channel.
+- full active-profile loading;
+- one-channel reveal boundary;
+- immediate and deferred contradiction behavior;
+- Wilhelmina's conversational response generation.
 
 ## Deferred live testing
 
-The final Discord pass must verify privileged Message Content Intent configuration, collection from multiple readable channels, bot/webhook exclusion, ephemeral admin responses, pause persistence across restart and reconnection, edited/deleted receipt handling, duplicate merges, contradiction behavior, designated-channel reveal boundaries, and full-profile loading in live Wilhelmina chat.
+The final Discord pass must verify Message Content Intent, collection from multiple channels, bot/webhook exclusion, private admin responses, pause persistence, edited/deleted receipts, duplicate merges, permanent replacement, gossip contradiction links, designated-channel reveal boundaries, and full-profile loading.
