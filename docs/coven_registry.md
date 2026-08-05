@@ -1,6 +1,6 @@
 # The Coven Registry
 
-The Coven Registry is Wilhelmina's persistent member ledger. It replaces a generic welcome-message flow with a numbered coven induction system and creates the profile shell that future memory features can extend.
+The Coven Registry is Wilhelmina's persistent member ledger. It replaces a generic welcome-message flow with a numbered coven induction system and creates the profile shell that the separate Memory Ledger extends.
 
 ## Coven Marks
 
@@ -38,7 +38,9 @@ Public commands expose only the Coven Mark, display name, classification, status
 
 Administrator commands expose the full operational file: Discord user ID, Registry number, join/departure timestamps, covenant version linkage, notice message ID, and persistence timestamps.
 
-The profile shell contains no inferred traits, conversation surveillance, personality judgments, likes, dislikes, or automatic notes. Future memory must be designed as a separate layer with review and deletion controls.
+The profile shell itself contains no inferred traits, personality judgments, likes, dislikes, or automatic notes. The separate [Memory Ledger](memory_ledger.md) defines the private memory layer, administration controls, receipts, deletion behavior, and reveal boundary.
+
+The existing `memory_opt_out` column is a legacy compatibility field only. It is not exposed by commands and does not alter Memory Ledger collection. Collection is controlled globally by the founder/admin under the approved Memory Ledger rules.
 
 ## Commands
 
