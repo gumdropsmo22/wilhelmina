@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from dataclasses import dataclass
+from typing import Any
 
 try:
-    from openai import OpenAI
+    import openai
+    from openai import AsyncOpenAI, OpenAI
 except ImportError:  # pragma: no cover - optional dependency guard
+    openai = None
+    AsyncOpenAI = None
     OpenAI = None
 
 logger = logging.getLogger("wilhelmina.ai")
@@ -15,22 +18,37 @@ logger = logging.getLogger("wilhelmina.ai")
 
 @dataclass(frozen=True)
 class AIConfig:
-    """Runtime configuration for AI-backed text generation."""
+    """Runtime configuration shared by Wilhelmina's OpenAI-backed features."""
 
     model: str = "gpt-4o-mini"
     timeout_seconds: float = 8.0
     max_retries: int = 1
+    store_responses: bool = False
 
     @classmethod
     def from_env(cls) -> "AIConfig":
         return cls(
             model=os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini",
             timeout_seconds=_read_float("AI_TIMEOUT_SECONDS", default=8.0),
-            max_retries=_read_int("AI_MAX_RETRIES", default=1),
+            max_retries=max(0, _read_int("AI_MAX_RETRIES", default=1)),
+            store_responses=_read_bool("OPENAI_STORE_RESPONSES", default=False),
         )
 
 
-_client: OpenAI | None = None
+@dataclass(frozen=True)
+class AIResult:
+    """Safe metadata returned from one successful OpenAI response."""
+
+    text: str
+    model: str
+    request_id: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+    total_tokens: int | None
+
+
+_sync_client: Any | None = None
+_async_client: Any | None = None
 
 
 def _read_float(name: str, *, default: float) -> float:
@@ -41,7 +59,7 @@ def _read_float(name: str, *, default: float) -> float:
     try:
         return float(raw)
     except ValueError:
-        logger.warning("invalid_float_setting name=%s value=%r default=%s", name, raw, default)
+        logger.warning("invalid_float_setting name=%s default=%s", name, default)
         return default
 
 
@@ -53,37 +71,231 @@ def _read_int(name: str, *, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
-        logger.warning("invalid_int_setting name=%s value=%r default=%s", name, raw, default)
+        logger.warning("invalid_int_setting name=%s default=%s", name, default)
         return default
 
 
-def _get_openai_client() -> OpenAI | None:
-    """Return a cached OpenAI client, or None when AI generation is unavailable."""
+def _read_bool(name: str, *, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
 
-    global _client
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
 
-    if OpenAI is None:
-        return None
+    logger.warning("invalid_bool_setting name=%s default=%s", name, default)
+    return default
 
-    if not os.getenv("OPENAI_API_KEY"):
-        return None
 
-    if _client is not None:
-        return _client
-
-    try:
-        _client = OpenAI()
-    except Exception:
-        logger.exception("openai_client_initialization_failed")
-        return None
-
-    return _client
+def _has_api_key() -> bool:
+    return bool(os.getenv("OPENAI_API_KEY", "").strip())
 
 
 def ai_available() -> bool:
-    """Return whether AI generation can be attempted."""
+    """Return whether the OpenAI SDK and an API key are available."""
 
-    return _get_openai_client() is not None
+    return OpenAI is not None and AsyncOpenAI is not None and _has_api_key()
+
+
+def _get_sync_openai_client() -> Any | None:
+    global _sync_client
+
+    if not ai_available():
+        return None
+    if _sync_client is not None:
+        return _sync_client
+
+    try:
+        _sync_client = OpenAI()
+    except Exception as exc:  # pragma: no cover - SDK construction failure is environment-specific
+        _log_failure(exc, purpose="client_init", model=None)
+        return None
+    return _sync_client
+
+
+def _get_async_openai_client() -> Any | None:
+    global _async_client
+
+    if not ai_available():
+        return None
+    if _async_client is not None:
+        return _async_client
+
+    try:
+        _async_client = AsyncOpenAI()
+    except Exception as exc:  # pragma: no cover - SDK construction failure is environment-specific
+        _log_failure(exc, purpose="async_client_init", model=None)
+        return None
+    return _async_client
+
+
+def _reset_clients_for_tests() -> None:
+    """Clear cached SDK clients. Tests only; runtime code should not call this."""
+
+    global _sync_client, _async_client
+    _sync_client = None
+    _async_client = None
+
+
+def _normalize_text(value: str, *, preserve_newlines: bool) -> str:
+    text = value.strip()
+    if preserve_newlines:
+        return text
+    return text.replace("\n", " ")
+
+
+def _usage_value(usage: object | None, name: str) -> int | None:
+    if usage is None:
+        return None
+    value = getattr(usage, name, None)
+    return int(value) if value is not None else None
+
+
+def _result_from_response(
+    response: object,
+    *,
+    fallback_model: str,
+    preserve_newlines: bool,
+) -> AIResult:
+    text = _normalize_text(str(getattr(response, "output_text", "") or ""), preserve_newlines=preserve_newlines)
+    usage = getattr(response, "usage", None)
+    return AIResult(
+        text=text,
+        model=str(getattr(response, "model", None) or fallback_model),
+        request_id=getattr(response, "_request_id", None),
+        input_tokens=_usage_value(usage, "input_tokens"),
+        output_tokens=_usage_value(usage, "output_tokens"),
+        total_tokens=_usage_value(usage, "total_tokens"),
+    )
+
+
+def _error_category(exc: Exception) -> str:
+    if openai is None:
+        return "sdk_unavailable"
+
+    error_categories = (
+        ("authentication", getattr(openai, "AuthenticationError", None)),
+        ("permission", getattr(openai, "PermissionDeniedError", None)),
+        ("rate_limit", getattr(openai, "RateLimitError", None)),
+        ("timeout", getattr(openai, "APITimeoutError", None)),
+        ("connection", getattr(openai, "APIConnectionError", None)),
+        ("not_found", getattr(openai, "NotFoundError", None)),
+        ("bad_request", getattr(openai, "BadRequestError", None)),
+        ("api_status", getattr(openai, "APIStatusError", None)),
+    )
+    for category, error_type in error_categories:
+        if error_type is not None and isinstance(exc, error_type):
+            return category
+    return "unexpected"
+
+
+def _log_failure(exc: Exception, *, purpose: str, model: str | None) -> None:
+    """Log operational metadata without logging prompts, responses, or secrets."""
+
+    logger.warning(
+        "openai_request_failed purpose=%s category=%s exception=%s model=%s request_id=%s status=%s",
+        purpose,
+        _error_category(exc),
+        type(exc).__name__,
+        model,
+        getattr(exc, "request_id", None),
+        getattr(exc, "status_code", None),
+    )
+
+
+def _log_success(result: AIResult, *, purpose: str) -> None:
+    logger.info(
+        "openai_request_succeeded purpose=%s model=%s request_id=%s input_tokens=%s output_tokens=%s total_tokens=%s",
+        purpose,
+        result.model,
+        result.request_id,
+        result.input_tokens,
+        result.output_tokens,
+        result.total_tokens,
+    )
+
+
+def generate_result(
+    prompt: str,
+    *,
+    config: AIConfig | None = None,
+    preserve_newlines: bool = False,
+    purpose: str = "text",
+) -> AIResult | None:
+    """Generate text synchronously and return safe response metadata on success."""
+
+    if not prompt.strip():
+        return None
+
+    client = _get_sync_openai_client()
+    if client is None:
+        return None
+
+    config = config or AIConfig.from_env()
+    try:
+        response = client.with_options(
+            timeout=config.timeout_seconds,
+            max_retries=config.max_retries,
+        ).responses.create(
+            model=config.model,
+            input=prompt,
+            store=config.store_responses,
+        )
+        result = _result_from_response(
+            response,
+            fallback_model=config.model,
+            preserve_newlines=preserve_newlines,
+        )
+        if not result.text:
+            return None
+        _log_success(result, purpose=purpose)
+        return result
+    except Exception as exc:
+        _log_failure(exc, purpose=purpose, model=config.model)
+        return None
+
+
+async def generate_result_async(
+    prompt: str,
+    *,
+    config: AIConfig | None = None,
+    preserve_newlines: bool = False,
+    purpose: str = "text",
+) -> AIResult | None:
+    """Generate text with the native asynchronous OpenAI client."""
+
+    if not prompt.strip():
+        return None
+
+    client = _get_async_openai_client()
+    if client is None:
+        return None
+
+    config = config or AIConfig.from_env()
+    try:
+        response = await client.with_options(
+            timeout=config.timeout_seconds,
+            max_retries=config.max_retries,
+        ).responses.create(
+            model=config.model,
+            input=prompt,
+            store=config.store_responses,
+        )
+        result = _result_from_response(
+            response,
+            fallback_model=config.model,
+            preserve_newlines=preserve_newlines,
+        )
+        if not result.text:
+            return None
+        _log_success(result, purpose=purpose)
+        return result
+    except Exception as exc:
+        _log_failure(exc, purpose=purpose, model=config.model)
+        return None
 
 
 def generate_text(
@@ -91,50 +303,59 @@ def generate_text(
     *,
     config: AIConfig | None = None,
     preserve_newlines: bool = False,
+    purpose: str = "text",
 ) -> str:
     """Generate text synchronously, returning an empty string on failure."""
 
-    client = _get_openai_client()
-    if client is None:
-        return ""
-
-    config = config or AIConfig.from_env()
-
-    for attempt in range(config.max_retries + 1):
-        try:
-            response = client.responses.create(
-                model=config.model,
-                input=prompt,
-                timeout=config.timeout_seconds,
-            )
-            text = response.output_text.strip()
-            if preserve_newlines:
-                return text
-            return text.replace("\n", " ")
-        except Exception:
-            logger.exception(
-                "ai_generation_failed attempt=%s model=%s timeout=%s",
-                attempt + 1,
-                config.model,
-                config.timeout_seconds,
-            )
-
-    return ""
+    result = generate_result(
+        prompt,
+        config=config,
+        preserve_newlines=preserve_newlines,
+        purpose=purpose,
+    )
+    return result.text if result else ""
 
 
-def generate_markdown(prompt: str, *, config: AIConfig | None = None) -> str:
+def generate_markdown(
+    prompt: str,
+    *,
+    config: AIConfig | None = None,
+    purpose: str = "markdown",
+) -> str:
     """Generate Discord markdown while preserving line breaks."""
 
-    return generate_text(prompt, config=config, preserve_newlines=True)
+    return generate_text(
+        prompt,
+        config=config,
+        preserve_newlines=True,
+        purpose=purpose,
+    )
 
 
-async def generate_text_async(prompt: str, *, config: AIConfig | None = None) -> str:
-    """Run AI generation without blocking Discord's event loop."""
+async def generate_text_async(
+    prompt: str,
+    *,
+    config: AIConfig | None = None,
+    purpose: str = "text",
+) -> str:
+    """Generate text without blocking Discord's event loop."""
 
-    return await asyncio.to_thread(generate_text, prompt, config=config)
+    result = await generate_result_async(prompt, config=config, purpose=purpose)
+    return result.text if result else ""
 
 
-async def generate_markdown_async(prompt: str, *, config: AIConfig | None = None) -> str:
-    """Run markdown generation without blocking Discord's event loop."""
+async def generate_markdown_async(
+    prompt: str,
+    *,
+    config: AIConfig | None = None,
+    purpose: str = "markdown",
+) -> str:
+    """Generate Discord markdown without blocking Discord's event loop."""
 
-    return await asyncio.to_thread(generate_markdown, prompt, config=config)
+    result = await generate_result_async(
+        prompt,
+        config=config,
+        preserve_newlines=True,
+        purpose=purpose,
+    )
+    return result.text if result else ""
