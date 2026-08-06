@@ -22,6 +22,26 @@ def _clean_name(value: str, *, field_name: str, max_length: int) -> str:
     return normalized
 
 
+def normalize_discord_display_name(value: str) -> str:
+    """Normalize a Discord-visible member name for trusted identity storage."""
+
+    return _clean_name(
+        value,
+        field_name="discord_display_name",
+        max_length=MAX_DISPLAY_NAME_LENGTH,
+    )
+
+
+def normalize_preferred_name(value: str) -> str:
+    """Normalize the separate name a member asks Wilhelmina to use."""
+
+    return _clean_name(
+        value,
+        field_name="preferred_name",
+        max_length=MAX_PREFERRED_NAME_LENGTH,
+    )
+
+
 def parse_birth_date(value: str | date) -> date:
     """Parse an ISO birth date without calculating or storing a stale age."""
 
@@ -87,16 +107,8 @@ class MemberIdentity:
                 f"member must be at least {minimum_age} years old for the adult server experience"
             )
         return cls(
-            discord_display_name=_clean_name(
-                discord_display_name,
-                field_name="discord_display_name",
-                max_length=MAX_DISPLAY_NAME_LENGTH,
-            ),
-            preferred_name=_clean_name(
-                preferred_name,
-                field_name="preferred_name",
-                max_length=MAX_PREFERRED_NAME_LENGTH,
-            ),
+            discord_display_name=normalize_discord_display_name(discord_display_name),
+            preferred_name=normalize_preferred_name(preferred_name),
             birth_date=parsed_birth_date,
         )
 
