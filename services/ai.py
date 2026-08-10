@@ -15,12 +15,22 @@ except ImportError:  # pragma: no cover - optional dependency guard
 
 logger = logging.getLogger("wilhelmina.ai")
 
+DEFAULT_MODEL = "gpt-5.6-sol"
+DEFAULT_CHAT_MODEL = "gpt-5.6-sol"
+DEFAULT_MEMORY_MODEL = "gpt-5.6-terra"
+VALID_RETENTION_MODES = frozenset({"standard", "mam", "zdr"})
+VALID_WORKLOADS = frozenset({"default", "chat", "memory"})
+
+
+class AIPrivacyConfigurationError(RuntimeError):
+    """Raised when a private OpenAI call would violate Wilhelmina's privacy contract."""
+
 
 @dataclass(frozen=True)
 class AIConfig:
     """Runtime configuration shared by Wilhelmina's OpenAI-backed features."""
 
-    model: str = "gpt-4o-mini"
+    model: str = DEFAULT_MODEL
     timeout_seconds: float = 8.0
     max_retries: int = 1
     store_responses: bool = False
@@ -28,11 +38,59 @@ class AIConfig:
     @classmethod
     def from_env(cls) -> "AIConfig":
         return cls(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini",
+            model=os.getenv("OPENAI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL,
             timeout_seconds=_read_float("AI_TIMEOUT_SECONDS", default=8.0),
             max_retries=max(0, _read_int("AI_MAX_RETRIES", default=1)),
             store_responses=_read_bool("OPENAI_STORE_RESPONSES", default=False),
         )
+
+
+@dataclass(frozen=True)
+class AIPlatformPolicy:
+    """Model routing and provider-retention assertions for private Wilhelmina features."""
+
+    default_model: str = DEFAULT_MODEL
+    chat_model: str = DEFAULT_CHAT_MODEL
+    memory_model: str = DEFAULT_MEMORY_MODEL
+    retention_mode: str = "standard"
+
+    @classmethod
+    def from_env(cls) -> "AIPlatformPolicy":
+        base = os.getenv("OPENAI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+        chat = os.getenv("OPENAI_CHAT_MODEL", DEFAULT_CHAT_MODEL).strip() or DEFAULT_CHAT_MODEL
+        memory = (
+            os.getenv("OPENAI_MEMORY_MODEL", DEFAULT_MEMORY_MODEL).strip()
+            or DEFAULT_MEMORY_MODEL
+        )
+        retention = (os.getenv("OPENAI_RETENTION_MODE", "standard").strip() or "standard").lower()
+        if retention not in VALID_RETENTION_MODES:
+            allowed = ", ".join(sorted(VALID_RETENTION_MODES))
+            raise AIPrivacyConfigurationError(
+                f"OPENAI_RETENTION_MODE must be one of: {allowed}"
+            )
+        return cls(
+            default_model=base,
+            chat_model=chat,
+            memory_model=memory,
+            retention_mode=retention,
+        )
+
+    @property
+    def enhanced_retention(self) -> bool:
+        """Return whether MAM or ZDR has been explicitly configured for the project."""
+
+        return self.retention_mode in {"mam", "zdr"}
+
+    def model_for(self, workload: str) -> str:
+        normalized = workload.strip().lower()
+        if normalized not in VALID_WORKLOADS:
+            allowed = ", ".join(sorted(VALID_WORKLOADS))
+            raise ValueError(f"Unknown AI workload {workload!r}; expected one of: {allowed}")
+        if normalized == "chat":
+            return self.chat_model
+        if normalized == "memory":
+            return self.memory_model
+        return self.default_model
 
 
 @dataclass(frozen=True)
@@ -88,6 +146,32 @@ def _read_bool(name: str, *, default: bool) -> bool:
 
     logger.warning("invalid_bool_setting name=%s default=%s", name, default)
     return default
+
+
+def private_ai_config(
+    *,
+    workload: str,
+    policy: AIPlatformPolicy | None = None,
+    require_enhanced_retention: bool = True,
+) -> AIConfig:
+    """Build a fail-closed config for memory-aware/private Discord content.
+
+    Provider-side MAM/ZDR is configured outside the request itself. This helper makes
+    that deployment assertion explicit and always forces Responses API storage off.
+    """
+
+    policy = policy or AIPlatformPolicy.from_env()
+    if require_enhanced_retention and not policy.enhanced_retention:
+        raise AIPrivacyConfigurationError(
+            "Private Wilhelmina OpenAI calls require OPENAI_RETENTION_MODE=mam or zdr"
+        )
+    base = AIConfig.from_env()
+    return AIConfig(
+        model=policy.model_for(workload),
+        timeout_seconds=base.timeout_seconds,
+        max_retries=base.max_retries,
+        store_responses=False,
+    )
 
 
 def _has_api_key() -> bool:
@@ -160,7 +244,10 @@ def _result_from_response(
     fallback_model: str,
     preserve_newlines: bool,
 ) -> AIResult:
-    text = _normalize_text(str(getattr(response, "output_text", "") or ""), preserve_newlines=preserve_newlines)
+    text = _normalize_text(
+        str(getattr(response, "output_text", "") or ""),
+        preserve_newlines=preserve_newlines,
+    )
     usage = getattr(response, "usage", None)
     return AIResult(
         text=text,
@@ -208,7 +295,8 @@ def _log_failure(exc: Exception, *, purpose: str, model: str | None) -> None:
 
 def _log_success(result: AIResult, *, purpose: str) -> None:
     logger.info(
-        "openai_request_succeeded purpose=%s model=%s request_id=%s input_tokens=%s output_tokens=%s total_tokens=%s",
+        "openai_request_succeeded purpose=%s model=%s request_id=%s input_tokens=%s "
+        "output_tokens=%s total_tokens=%s",
         purpose,
         result.model,
         result.request_id,
@@ -296,6 +384,30 @@ async def generate_result_async(
     except Exception as exc:
         _log_failure(exc, purpose=purpose, model=config.model)
         return None
+
+
+async def generate_private_result_async(
+    prompt: str,
+    *,
+    workload: str,
+    purpose: str,
+    policy: AIPlatformPolicy | None = None,
+    preserve_newlines: bool = False,
+    require_enhanced_retention: bool = True,
+) -> AIResult | None:
+    """Run an async private-content request through the fail-closed privacy policy."""
+
+    config = private_ai_config(
+        workload=workload,
+        policy=policy,
+        require_enhanced_retention=require_enhanced_retention,
+    )
+    return await generate_result_async(
+        prompt,
+        config=config,
+        preserve_newlines=preserve_newlines,
+        purpose=purpose,
+    )
 
 
 def generate_text(
