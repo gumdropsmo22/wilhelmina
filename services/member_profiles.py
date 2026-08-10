@@ -162,6 +162,25 @@ def get_member_identity(
     return _row_to_identity(row) if row is not None else None
 
 
+def profile_is_complete(
+    connection: sqlite3.Connection,
+    *,
+    guild_id: int,
+    user_id: int,
+) -> bool:
+    """Return whether the member has a persisted identity profile, regardless of consent version."""
+
+    return (
+        get_member_identity(
+            connection,
+            guild_id=guild_id,
+            user_id=user_id,
+            required=False,
+        )
+        is not None
+    )
+
+
 def profile_has_current_consent(
     connection: sqlite3.Connection,
     *,
