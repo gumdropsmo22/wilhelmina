@@ -57,6 +57,8 @@ def test_identity_persists_both_names_full_birth_date_and_consent(tmp_path) -> N
     assert stored.preferred_name == "Jessica"
     assert stored.birth_date == "1991-10-31"
     assert stored.adult_memory_consent_at == "2026-08-06T20:00:00+00:00"
+    assert stored.memory_consent_version == member_profiles.CURRENT_MEMORY_CONSENT_VERSION
+    assert stored.has_current_memory_consent is True
     assert context.discord_display_name == "xXDarkSylveonXx"
     assert context.preferred_name == "Jessica"
     assert context.birth_date == "1991-10-31"
@@ -92,6 +94,7 @@ def test_identity_survives_a_new_database_connection(tmp_path) -> None:
     assert stored.discord_display_name == "Screen Name"
     assert stored.preferred_name == "Real Name"
     assert stored.birth_date == "1990-01-01"
+    assert stored.has_current_memory_consent is True
 
 
 def test_adult_memory_consent_is_required(tmp_path) -> None:
@@ -118,6 +121,26 @@ def test_adult_memory_consent_is_required(tmp_path) -> None:
         )
 
     assert stored is None
+
+
+def test_consent_version_cannot_be_empty(tmp_path) -> None:
+    path = tmp_path / "identity.sqlite3"
+    _bootstrap(path)
+
+    with managed_connection(path) as connection:
+        with pytest.raises(MemberIdentityError, match="consent_version"):
+            member_profiles.save_member_identity(
+                connection,
+                guild_id=1,
+                user_id=300,
+                discord_display_name="Screen Name",
+                preferred_name="Real Name",
+                birth_date="1990-01-01",
+                today=date(2026, 8, 6),
+                adult_memory_consent=True,
+                consent_version="   ",
+                actor_user_id=300,
+            )
 
 
 def test_underage_profile_does_not_change_registry_name(tmp_path) -> None:
@@ -234,6 +257,7 @@ def test_identity_audit_omits_names_and_birth_date(tmp_path) -> None:
     assert "Secret Screen Name" not in payload
     assert "Secret Preferred Name" not in payload
     assert "1991-10-31" not in payload
+    assert member_profiles.CURRENT_MEMORY_CONSENT_VERSION in payload
 
 
 def test_identity_schema_version_and_table_are_created(tmp_path) -> None:
@@ -252,6 +276,12 @@ def test_identity_schema_version_and_table_are_created(tmp_path) -> None:
             WHERE type = 'table' AND name = 'coven_member_identity_profiles'
             """
         ).fetchone()
+        columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(coven_member_identity_profiles)"
+            ).fetchall()
+        }
         versions = {
             int(row["version"])
             for row in connection.execute("SELECT version FROM schema_migrations").fetchall()
@@ -260,4 +290,57 @@ def test_identity_schema_version_and_table_are_created(tmp_path) -> None:
         connection.close()
 
     assert table is not None
+    assert "memory_consent_version" in columns
     assert member_profiles.MEMBER_IDENTITY_SCHEMA_VERSION in versions
+
+
+def test_legacy_identity_profile_migrates_without_granting_new_consent(tmp_path) -> None:
+    path = tmp_path / "identity.sqlite3"
+    _bootstrap(path)
+
+    with managed_connection(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE coven_member_identity_profiles (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                preferred_name TEXT NOT NULL,
+                birth_date TEXT NOT NULL,
+                adult_memory_consent_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, user_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO coven_member_identity_profiles (
+                guild_id, user_id, preferred_name, birth_date,
+                adult_memory_consent_at, created_at, updated_at
+            )
+            VALUES (1, 300, 'Jessica', '1991-10-31', 'old-consent', 'created', 'updated')
+            """
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (7, 'old')"
+        )
+
+        member_profiles.initialize_member_identity_schema(connection)
+        stored = member_profiles.get_member_identity(
+            connection,
+            guild_id=1,
+            user_id=300,
+            required=True,
+        )
+
+        assert stored is not None
+        assert stored.memory_consent_version == member_profiles.LEGACY_MEMORY_CONSENT_VERSION
+        assert stored.has_current_memory_consent is False
+        with pytest.raises(MemberIdentityError, match="current adult memory disclosure"):
+            member_profiles.get_trusted_identity_context(
+                connection,
+                guild_id=1,
+                user_id=300,
+                on_date=date(2026, 8, 6),
+            )
