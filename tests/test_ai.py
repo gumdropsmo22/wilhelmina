@@ -76,6 +76,82 @@ def test_config_reads_privacy_timeout_and_retry_settings(monkeypatch):
     assert config.store_responses is True
 
 
+def test_quality_first_defaults_use_sol_for_chat_and_terra_for_memory(monkeypatch):
+    for name in (
+        "OPENAI_MODEL",
+        "OPENAI_CHAT_MODEL",
+        "OPENAI_MEMORY_MODEL",
+        "OPENAI_RETENTION_MODE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    policy = ai.AIPlatformPolicy.from_env()
+
+    assert ai.AIConfig.from_env().model == "gpt-5.6-sol"
+    assert policy.model_for("default") == "gpt-5.6-sol"
+    assert policy.model_for("chat") == "gpt-5.6-sol"
+    assert policy.model_for("memory") == "gpt-5.6-terra"
+    assert policy.retention_mode == "standard"
+
+
+def test_platform_policy_allows_explicit_model_overrides(monkeypatch):
+    monkeypatch.setenv("OPENAI_MODEL", "default-model")
+    monkeypatch.setenv("OPENAI_CHAT_MODEL", "chat-model")
+    monkeypatch.setenv("OPENAI_MEMORY_MODEL", "memory-model")
+    monkeypatch.setenv("OPENAI_RETENTION_MODE", "mam")
+
+    policy = ai.AIPlatformPolicy.from_env()
+
+    assert policy.model_for("default") == "default-model"
+    assert policy.model_for("chat") == "chat-model"
+    assert policy.model_for("memory") == "memory-model"
+    assert policy.enhanced_retention is True
+
+
+def test_platform_policy_rejects_unknown_retention_mode(monkeypatch):
+    monkeypatch.setenv("OPENAI_RETENTION_MODE", "magic")
+
+    with pytest.raises(ai.AIPrivacyConfigurationError, match="OPENAI_RETENTION_MODE"):
+        ai.AIPlatformPolicy.from_env()
+
+
+def test_private_config_fails_closed_without_enhanced_retention(monkeypatch):
+    monkeypatch.setenv("OPENAI_RETENTION_MODE", "standard")
+
+    with pytest.raises(ai.AIPrivacyConfigurationError, match="mam or zdr"):
+        ai.private_ai_config(workload="chat")
+
+
+@pytest.mark.parametrize("retention_mode", ["mam", "zdr"])
+def test_private_config_forces_store_false_and_routes_workload(monkeypatch, retention_mode):
+    monkeypatch.setenv("OPENAI_RETENTION_MODE", retention_mode)
+    monkeypatch.setenv("OPENAI_STORE_RESPONSES", "true")
+    monkeypatch.setenv("OPENAI_CHAT_MODEL", "private-chat")
+    monkeypatch.setenv("OPENAI_MEMORY_MODEL", "private-memory")
+
+    chat = ai.private_ai_config(workload="chat")
+    memory = ai.private_ai_config(workload="memory")
+
+    assert chat.model == "private-chat"
+    assert memory.model == "private-memory"
+    assert chat.store_responses is False
+    assert memory.store_responses is False
+
+
+def test_private_config_can_be_exercised_with_standard_retention_in_synthetic_tests(
+    monkeypatch,
+):
+    monkeypatch.setenv("OPENAI_RETENTION_MODE", "standard")
+
+    config = ai.private_ai_config(
+        workload="memory",
+        require_enhanced_retention=False,
+    )
+
+    assert config.model == "gpt-5.6-terra"
+    assert config.store_responses is False
+
+
 def test_config_rejects_negative_retries(monkeypatch):
     monkeypatch.setenv("AI_MAX_RETRIES", "-5")
 
@@ -143,6 +219,34 @@ async def test_generate_result_async_uses_native_async_client(monkeypatch):
     assert result.text == "First line\nSecond line"
     assert client.options == {"timeout": 6.0, "max_retries": 1}
     assert client.responses.calls[0]["store"] is False
+
+
+@pytest.mark.asyncio
+async def test_private_async_call_uses_fail_closed_config(monkeypatch):
+    client = FakeAsyncClient()
+    monkeypatch.setattr(ai, "_get_async_openai_client", lambda: client)
+    policy = ai.AIPlatformPolicy(
+        default_model="default",
+        chat_model="chat-sol",
+        memory_model="memory-terra",
+        retention_mode="zdr",
+    )
+
+    result = await ai.generate_private_result_async(
+        "Private Discord context",
+        workload="chat",
+        purpose="private_test",
+        policy=policy,
+    )
+
+    assert result is not None
+    assert client.responses.calls == [
+        {
+            "model": "chat-sol",
+            "input": "Private Discord context",
+            "store": False,
+        }
+    ]
 
 
 @pytest.mark.asyncio
