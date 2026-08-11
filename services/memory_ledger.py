@@ -301,7 +301,7 @@ def _migrate_memory_records_v9(connection: sqlite3.Connection) -> None:
         )
     if "importance" not in columns:
         connection.execute(
-            "ALTER TABLE memory_records ADD COLUMN importance INTEGER NOT NULL DEFAULT 50"
+            "ALTER TABLE memory_records ADD COLUMN importance INTEGER NOT NULL DEFAULT 50 CHECK (importance BETWEEN 0 AND 100)"
         )
 
     connection.execute(
@@ -983,14 +983,15 @@ def add_memory(
             (timestamp, timestamp, memory.id),
         )
     else:
-        if not is_gossip and replace_normal_category:
+        if not is_gossip and resolved_privacy == "ordinary" and replace_normal_category:
             rows = connection.execute(
                 """
                 SELECT id FROM memory_records
                 WHERE guild_id = ? AND subject_user_id = ? AND topic_key = ?
                   AND active = 1 AND is_gossip = 0
+                  AND privacy_class = 'ordinary' AND reveal_scope = ?
                 """,
-                (int(guild_id), int(subject_user_id), resolved_topic_key),
+                (int(guild_id), int(subject_user_id), resolved_topic_key, resolved_scope),
             ).fetchall()
             replaced_ids = [int(row["id"]) for row in rows]
             for replaced_id in replaced_ids:
