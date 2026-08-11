@@ -68,7 +68,7 @@ def _is_private_identity_admin(interaction: discord.Interaction, bot: commands.B
     return settings is not None and settings.founder_user_id == interaction.user.id
 
 
-class MemberInductionModal(discord.ui.Modal, title="Complete your induction"):
+class MemberInductionModal(discord.ui.Modal, title="Adult memory: DMs + callbacks"):
     preferred_name = discord.ui.TextInput(
         label="What should Wilhelmina call you?",
         placeholder="The name you actually want used",
@@ -83,8 +83,8 @@ class MemberInductionModal(discord.ui.Modal, title="Complete your induction"):
         max_length=10,
     )
     consent = discord.ui.TextInput(
-        label="Type I CONSENT to adult memory",
-        placeholder=CONSENT_PHRASE,
+        label="Type I CONSENT to memory + callbacks",
+        placeholder="DMs may be remembered; social memories may resurface with others",
         required=True,
         max_length=20,
     )
@@ -159,9 +159,16 @@ class MemberInductionModal(discord.ui.Modal, title="Complete your induction"):
             return
 
         if acceptance.already_accepted:
-            message = "Your identity profile is recorded, and that covenant was already accepted."
+            message = (
+                "Your profile and current memory consent are recorded; "
+                "that covenant was already accepted."
+            )
         else:
-            message = "Induction complete. I have the name you gave me, your screen name, and your birthday."
+            message = (
+                "Induction complete. I have both names and your full birthday. "
+                "Messages you send Wilhelmina, including DMs, may be remembered, "
+                "and ordinary social memories may resurface in her approved chats."
+            )
         await interaction.followup.send(message, ephemeral=True)
 
 
@@ -172,7 +179,7 @@ async def begin_covenant_acceptance(
     guild_id: int,
     rules_version_id: int,
 ) -> None:
-    """Accept directly for known adults; otherwise collect the private identity profile first."""
+    """Accept directly only when the current adult-memory disclosure is on file."""
 
     initialize_database(_database_path(bot))
     with managed_connection(_database_path(bot)) as connection:
@@ -186,7 +193,7 @@ async def begin_covenant_acceptance(
             user_id=interaction.user.id,
             required=False,
         )
-        if profile is not None:
+        if profile is not None and profile.has_current_memory_consent:
             result = rules_service.accept_rules_version(
                 connection,
                 guild_id=int(guild_id),
@@ -293,6 +300,7 @@ class MemberIdentityAdmin(commands.GroupCog, group_name="identity-admin"):
             f"birth_date   = {context.birth_date}\n"
             f"age          = {context.age}\n"
             f"consent_at   = {profile.adult_memory_consent_at}\n"
+            f"consent_ver  = {profile.memory_consent_version}\n"
             "```",
             ephemeral=True,
         )
