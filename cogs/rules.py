@@ -6,15 +6,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs.member_identity import begin_covenant_acceptance, install_member_identity
 from services import rules as rules_service
 from services.database import initialize_database, managed_connection
 from services.persona import render_persona_text
 
 RULES_FIELD_LIMIT = 900
 NO_ACTIVE_COVENANT = "No active covenant is configured yet."
-STALE_COVENANT = "This covenant is outdated. Use `/rules` for the current one."
-ACCEPTED_COVENANT = "Recorded. You accepted the covenant. Try honoring it."
-ALREADY_ACCEPTED_COVENANT = "Already accepted. The ledger did not forget you."
 MISSING_HOME_GUILD = "This is not configured yet. Someone with keys needs to fix that."
 DEFAULT_ACCEPT_LABEL = "I Accept the Covenant"
 
@@ -56,7 +54,10 @@ def _guild_id(interaction: discord.Interaction) -> int:
 
 def _chunk_text(value: str) -> list[str]:
     text = value.strip() or "No rules text has been written yet."
-    return [text[index : index + RULES_FIELD_LIMIT] for index in range(0, len(text), RULES_FIELD_LIMIT)]
+    return [
+        text[index : index + RULES_FIELD_LIMIT]
+        for index in range(0, len(text), RULES_FIELD_LIMIT)
+    ]
 
 
 async def build_rules_embed(
@@ -116,40 +117,19 @@ class CovenantGateView(discord.ui.View):
         return False
 
     @discord.ui.button(label=DEFAULT_ACCEPT_LABEL, style=discord.ButtonStyle.success)
-    async def accept_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def accept_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
         if not await _guard_home_guild(interaction, self.bot):
             return
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        initialize_database(_database_path(self.bot))
-        with managed_connection(_database_path(self.bot)) as connection:
-            rules = rules_service.get_rules_version_by_id(connection, self.rules_version_id)
-            if not rules.is_active:
-                await interaction.followup.send(STALE_COVENANT, ephemeral=True)
-                return
-            result = rules_service.accept_rules_version(
-                connection,
-                guild_id=self.guild_id,
-                user_id=interaction.user.id,
-                rules_version_id=rules.id,
-                accepted_via="button",
-                actor_user_id=interaction.user.id,
-            )
-
-        message = await render_persona_text(
-            feature_key="rules_acceptance",
-            task=(
-                "Write one short confirmation that the user accepted the server covenant. "
-                "If they had already accepted, acknowledge that without scolding."
-            ),
-            context={
-                "guild": interaction.guild.name if interaction.guild else "unknown guild",
-                "version": rules.version_tag,
-                "already_accepted": result.already_accepted,
-            },
-            fallback=(ALREADY_ACCEPTED_COVENANT if result.already_accepted else ACCEPTED_COVENANT),
+        await begin_covenant_acceptance(
+            interaction,
+            bot=self.bot,
+            guild_id=self.guild_id,
+            rules_version_id=self.rules_version_id,
         )
-        await interaction.followup.send(message, ephemeral=True)
 
 
 @app_commands.guild_only()
@@ -169,14 +149,22 @@ class Rules(commands.Cog):
         initialize_database(_database_path(self.bot))
         try:
             with managed_connection(_database_path(self.bot)) as connection:
-                active_rules = rules_service.get_active_rules(connection, guild_id=_guild_id(interaction))
+                active_rules = rules_service.get_active_rules(
+                    connection,
+                    guild_id=_guild_id(interaction),
+                )
         except rules_service.RulesNotConfigured:
             await interaction.edit_original_response(content=NO_ACTIVE_COVENANT)
             return
         if active_rules is None:
             await interaction.edit_original_response(content=NO_ACTIVE_COVENANT)
             return
-        embed = await build_rules_embed(interaction=interaction, rules=active_rules, mode="preview")
+
+        embed = await build_rules_embed(
+            interaction=interaction,
+            rules=active_rules,
+            mode="preview",
+        )
         view = CovenantGateView(
             bot=self.bot,
             guild_id=_guild_id(interaction),
@@ -271,8 +259,15 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
             ephemeral=True,
         )
 
-    @app_commands.command(name="preview", description="Preview a covenant version without publishing it.")
-    async def preview(self, interaction: discord.Interaction, version_tag: str | None = None) -> None:
+    @app_commands.command(
+        name="preview",
+        description="Preview a covenant version without publishing it.",
+    )
+    async def preview(
+        self,
+        interaction: discord.Interaction,
+        version_tag: str | None = None,
+    ) -> None:
         if not await self._guard(interaction):
             return
 
@@ -287,7 +282,10 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
                         version_tag=version_tag,
                     )
                 else:
-                    rules = rules_service.get_active_rules(connection, guild_id=_guild_id(interaction))
+                    rules = rules_service.get_active_rules(
+                        connection,
+                        guild_id=_guild_id(interaction),
+                    )
         except rules_service.RulesError as exc:
             await interaction.edit_original_response(content=f"Rules error: {exc}")
             return
@@ -296,11 +294,19 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
             await interaction.edit_original_response(content="No covenant version is available.")
             return
 
-        embed = await build_rules_embed(interaction=interaction, rules=rules, mode="admin-preview")
+        embed = await build_rules_embed(
+            interaction=interaction,
+            rules=rules,
+            mode="admin-preview",
+        )
         await interaction.edit_original_response(embed=embed)
 
     @app_commands.command(name="publish", description="Publish the active Covenant Gate to a channel.")
-    async def publish(self, interaction: discord.Interaction, channel: discord.TextChannel) -> None:
+    async def publish(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+    ) -> None:
         if not await self._guard(interaction):
             return
 
@@ -308,7 +314,10 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
         initialize_database(_database_path(self.bot))
         try:
             with managed_connection(_database_path(self.bot)) as connection:
-                active_rules = rules_service.get_active_rules(connection, guild_id=_guild_id(interaction))
+                active_rules = rules_service.get_active_rules(
+                    connection,
+                    guild_id=_guild_id(interaction),
+                )
         except rules_service.RulesError as exc:
             await interaction.edit_original_response(content=f"Rules error: {exc}")
             return
@@ -317,7 +326,11 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
             await interaction.edit_original_response(content=NO_ACTIVE_COVENANT)
             return
 
-        embed = await build_rules_embed(interaction=interaction, rules=active_rules, mode="publish")
+        embed = await build_rules_embed(
+            interaction=interaction,
+            rules=active_rules,
+            mode="publish",
+        )
         view = CovenantGateView(
             bot=self.bot,
             guild_id=_guild_id(interaction),
@@ -349,7 +362,10 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
         initialize_database(_database_path(self.bot))
         try:
             with managed_connection(_database_path(self.bot)) as connection:
-                summary = rules_service.summarize_acceptance(connection, guild_id=_guild_id(interaction))
+                summary = rules_service.summarize_acceptance(
+                    connection,
+                    guild_id=_guild_id(interaction),
+                )
         except rules_service.RulesError as exc:
             await interaction.response.send_message(f"Rules error: {exc}", ephemeral=True)
             return
@@ -372,7 +388,10 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
         initialize_database(_database_path(self.bot))
         try:
             with managed_connection(_database_path(self.bot)) as connection:
-                active_rules = rules_service.get_active_rules(connection, guild_id=_guild_id(interaction))
+                active_rules = rules_service.get_active_rules(
+                    connection,
+                    guild_id=_guild_id(interaction),
+                )
                 acceptance = rules_service.get_acceptance_for_user(
                     connection,
                     guild_id=_guild_id(interaction),
@@ -457,4 +476,5 @@ def _register_persistent_views(bot: commands.Bot) -> None:
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Rules(bot))
     await bot.add_cog(RulesAdmin(bot))
+    await install_member_identity(bot)
     _register_persistent_views(bot)
