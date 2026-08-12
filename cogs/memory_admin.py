@@ -13,6 +13,10 @@ from services import memory_ledger, memory_policy, member_profiles
 from services.database import initialize_database, managed_connection
 
 PAGE_SIZE = 8
+DISCORD_EMBED_TEXT_LIMIT = 6000
+RECEIPT_MESSAGE_TEXT_BUDGET = 5500
+RECEIPT_FOOTER_RESERVE = 160
+MAX_EMBEDS_PER_MESSAGE = 10
 MAX_DISCORD_USER_ID = (1 << 64) - 1
 CATEGORY_CHOICES = [
     app_commands.Choice(name=value, value=value) for value in memory_ledger.VALID_CATEGORIES
@@ -139,6 +143,92 @@ def _receipt_embed(receipt: memory_ledger.MemoryReceipt) -> discord.Embed:
     if receipt.jump_url:
         embed.add_field(name="Jump", value=receipt.jump_url, inline=False)
     return embed
+
+
+def _embed_text_size(embed: discord.Embed) -> int:
+    """Return Discord's aggregate text contribution for one embed."""
+
+    data = embed.to_dict()
+    total = len(str(data.get("title", ""))) + len(str(data.get("description", "")))
+    total += len(str(data.get("footer", {}).get("text", "")))
+    total += len(str(data.get("author", {}).get("name", "")))
+    for field in data.get("fields", []):
+        total += len(str(field.get("name", "")))
+        total += len(str(field.get("value", "")))
+    return total
+
+
+def _receipt_embed_groups(
+    receipts: list[memory_ledger.MemoryReceipt],
+    *,
+    current_page: int,
+    page_count: int,
+    total_receipts: int,
+) -> list[list[discord.Embed]]:
+    """Render one logical receipt page into Discord-safe message groups."""
+
+    embeds = [_receipt_embed(receipt) for receipt in receipts]
+    if not embeds:
+        return []
+
+    payload_budget = RECEIPT_MESSAGE_TEXT_BUDGET - RECEIPT_FOOTER_RESERVE
+    groups: list[list[discord.Embed]] = []
+    current_group: list[discord.Embed] = []
+    current_size = 0
+
+    for embed in embeds:
+        embed_size = _embed_text_size(embed)
+        if embed_size > DISCORD_EMBED_TEXT_LIMIT:
+            raise ValueError("A receipt embed exceeds Discord's individual 6,000-character limit")
+        if embed_size > payload_budget:
+            raise ValueError("A receipt embed is too large for the safe receipt message budget")
+
+        would_overflow = current_group and (
+            current_size + embed_size > payload_budget
+            or len(current_group) >= MAX_EMBEDS_PER_MESSAGE
+        )
+        if would_overflow:
+            groups.append(current_group)
+            current_group = []
+            current_size = 0
+
+        current_group.append(embed)
+        current_size += embed_size
+
+    if current_group:
+        groups.append(current_group)
+
+    page_start = (current_page - 1) * PAGE_SIZE
+    consumed = 0
+    part_count = len(groups)
+    for part_number, group in enumerate(groups, start=1):
+        first_receipt = page_start + consumed + 1
+        last_receipt = first_receipt + len(group) - 1
+        group[-1].set_footer(
+            text=(
+                f"Page {current_page}/{page_count} · receipts "
+                f"{first_receipt}-{last_receipt}/{total_receipts} · "
+                f"part {part_number}/{part_count}"
+            )
+        )
+        consumed += len(group)
+
+        group_size = sum(_embed_text_size(embed) for embed in group)
+        if group_size > RECEIPT_MESSAGE_TEXT_BUDGET:
+            raise ValueError("Receipt embed group exceeds the safe Discord message budget")
+
+    return groups
+
+
+async def _send_receipt_embed_groups(
+    interaction: discord.Interaction,
+    groups: list[list[discord.Embed]],
+) -> None:
+    """Send the first receipt group as the response and overflow as private follow-ups."""
+
+    await interaction.response.send_message(embeds=groups[0], ephemeral=True)
+    for group in groups[1:]:
+        await interaction.followup.send(embeds=group, ephemeral=True)
 
 
 @app_commands.guild_only()
@@ -501,9 +591,17 @@ class MemoryAdmin(commands.GroupCog, group_name="memory-admin"):
                 ephemeral=True,
             )
             return
-        embeds = [_receipt_embed(receipt) for receipt in rows]
-        embeds[-1].set_footer(text=f"Page {current}/{pages} · {len(all_receipts)} receipts")
-        await interaction.response.send_message(embeds=embeds, ephemeral=True)
+        try:
+            groups = _receipt_embed_groups(
+                rows,
+                current_page=current,
+                page_count=pages,
+                total_receipts=len(all_receipts),
+            )
+        except ValueError as exc:
+            await self._ledger_error(interaction, exc)
+            return
+        await _send_receipt_embed_groups(interaction, groups)
 
     @app_commands.command(
         name="search",
