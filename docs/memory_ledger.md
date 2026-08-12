@@ -22,7 +22,7 @@ The current disclosure covers interaction memory, DMs directly with Wilhelmina, 
 
 ### Memory Ledger schema v9
 
-Phase 2 upgrades the Memory Ledger from v6 to v9. Version 8 is already occupied by identity-consent migration, so v9 is the next persistence version.
+Phase 2 upgraded the Memory Ledger from v6 to v9. Version 8 is already occupied by identity-consent migration, so v9 is the persistence version used by the current control surface.
 
 Schema v9 contains:
 
@@ -33,7 +33,7 @@ Schema v9 contains:
 - `memory_entities`;
 - `memory_search` (SQLite FTS5 virtual table and sync triggers).
 
-Automatic Discord extraction and the live chat surface are **not** implemented by this schema phase. They remain later phases.
+Automatic Discord extraction and the live chat surface are **not** implemented by the schema/control phases. They remain later phases.
 
 ## Memory record
 
@@ -241,7 +241,7 @@ Adult/social character direction never converts prohibited secrets or admin-only
 
 ## Collection policy
 
-Automatic collection is still controlled separately by the Phase-1 runtime policy:
+Automatic collection is controlled separately by the runtime policy:
 
 - `off` — no automatic extraction;
 - `interaction` — eligible interaction involving Wilhelmina;
@@ -249,7 +249,7 @@ Automatic collection is still controlled separately by the Phase-1 runtime polic
 
 The default remains `off`.
 
-Phase 2 supplies durable local structures only; it does not activate automatic collection.
+Phase 3 adds a separate persistent database pause/resume gate. Resuming that gate never overrides the runtime policy, and automatic extraction itself remains a later implementation phase.
 
 ## v6 → v9 migration matrix
 
@@ -280,7 +280,7 @@ Indexes never reference v9 columns before those columns exist.
 
 ## Integrity checks
 
-`check_memory_integrity()` provides a local Phase-2 diagnostic for:
+`check_memory_integrity()` provides a local diagnostic for:
 
 - SQLite foreign-key violations;
 - orphan/mismatched entity rows;
@@ -290,11 +290,33 @@ Indexes never reference v9 columns before those columns exist.
 
 Tests also verify that deleting a memory removes dependent receipts, entity rows, contradiction links, and FTS searchability.
 
+## Phase 3 — Memory controls
+
+Phase 3 adds `cogs.memory_admin`, controlled by `ENABLE_MEMORY_ADMIN=true` by default. Every `/memory-admin` response is ephemeral, administrator-only, and restricted to the configured home guild.
+
+Implemented controls:
+
+- status plus integrity diagnostics;
+- persistent pause/resume;
+- designated Wilhelmina channel set/clear;
+- paginated private profiles;
+- record detail and receipt inspection;
+- local FTS search across explicitly selected admin-visible reveal scopes;
+- manual admin-authored add/edit/delete;
+- content-free member data inventory;
+- permanent member-wide Memory Ledger deletion with explicit confirmation.
+
+Single-record deletion requires `DELETE`. Member-wide Memory Ledger deletion requires `DELETE MEMBER`.
+
+Member-wide deletion intentionally removes Memory Ledger records and their dependent receipts/entities/contradiction/search rows only. It does not silently delete Coven Registry or private identity/consent records. Broader member-data handling must use those feature boundaries explicitly.
+
+See `docs/memory_controls.md` for the command and privacy contract.
+
 ## Rollback notes
 
 Do not downgrade an already-migrated production database by merely running older code against it.
 
-Safe rollback for this phase is operational:
+Safe rollback for the v9 persistence phase is operational:
 
 1. stop Wilhelmina before changing database code;
 2. restore the pre-v9 SQLite backup/snapshot together with the previous application revision; or
@@ -302,11 +324,9 @@ Safe rollback for this phase is operational:
 
 The migration intentionally does not keep duplicated private-content backup tables after success. Old receipt rows are copied into the v9 table and the temporary legacy table is dropped in the same transaction managed by the caller.
 
+Phase 3 adds no schema migration. Its command surface can be rolled back by disabling `ENABLE_MEMORY_ADMIN` or deploying the previous application revision; existing v9 data and settings remain intact.
+
 ## Remaining implementation phases
-
-### Phase 3 — Memory controls
-
-Founder/admin commands, required member data controls, persistent pause/resume/channel controls, authorization and privacy tests.
 
 ### Phase 4 — Automatic memory extraction
 
