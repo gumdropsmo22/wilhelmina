@@ -136,6 +136,8 @@ All destructive decisions remain Python/SQLite behavior.
 
 An exact duplicate keeps one memory record, adds the new receipt, and updates confirmation timestamps.
 
+The Phase-3 admin write path adds a fail-safe rule around duplicate metadata: privacy may tighten but never loosen. If a duplicate admin write requests a narrower privacy/reveal posture than the stored record, the existing record is tightened after the receipt merge. A later broader duplicate cannot reopen an already narrower record. Duplicate importance stays at its existing stored value unless an admin explicitly changes it through the edit command.
+
 ### Topic-scoped correction
 
 Ordinary replacement is **topic-scoped**, not category-wide.
@@ -303,12 +305,16 @@ Implemented controls:
 - record detail and receipt inspection;
 - local FTS search across explicitly selected admin-visible reveal scopes;
 - manual admin-authored add/edit/delete;
-- content-free member data inventory;
-- permanent member-wide Memory Ledger deletion with explicit confirmation.
+- content-free member data inventory for current or departed members;
+- permanent member-wide Memory Ledger deletion for current or departed members with explicit confirmation.
 
 Single-record deletion requires `DELETE`. Member-wide Memory Ledger deletion requires `DELETE MEMBER`.
 
-Member-wide deletion intentionally removes Memory Ledger records and their dependent receipts/entities/contradiction/search rows only. It does not silently delete Coven Registry or private identity/consent records. Broader member-data handling must use those feature boundaries explicitly.
+Current-member commands accept a Discord member selection. Departed/archived-member variants accept a positive decimal Discord user ID string so the same data controls remain available after the member leaves the guild.
+
+Member-wide deletion covers both kinds of Memory Ledger data tied to the member: records where they are the subject **and receipts they authored on another subject's memory**. Cross-subject authored receipts are deleted during the purge. If removing them leaves another memory with zero receipts, that now-evidence-less memory is also deleted; if another receipt remains, the memory survives.
+
+The purge deliberately does not silently delete Coven Registry or private identity/consent records. Broader member-data handling must use those feature boundaries explicitly.
 
 See `docs/memory_controls.md` for the command and privacy contract.
 
