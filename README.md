@@ -202,12 +202,18 @@ Core commands:
 /memory-admin edit
 /memory-admin delete
 /memory-admin member-data
+/memory-admin member-data-id
 /memory-admin delete-member
+/memory-admin delete-member-id
 ```
 
 The persistent pause/resume switch is separate from `MEMORY_COLLECTION_MODE`. Resuming the local gate does not activate automatic extraction by itself. Search and inspection are local SQLite operations; Phase 3 does not call OpenAI and does not need an API key.
 
-Single-memory deletion requires the exact confirmation text `DELETE`. Member-wide Memory Ledger deletion requires `DELETE MEMBER` and deliberately does **not** silently delete Coven Registry or private identity/consent rows.
+Exact duplicate admin writes still merge receipts. Their privacy metadata may tighten but never loosen: a later restricted/admin-only confirmation can narrow an existing ordinary record, while a broader duplicate cannot reopen a record that is already narrower. The command reports the actual stored privacy/reveal scope and importance.
+
+Single-memory deletion requires the exact confirmation text `DELETE`. Member-wide Memory Ledger deletion requires `DELETE MEMBER`. The member-wide purge removes the member's own Memory Ledger records **and** receipts they authored on other members' memories. Any memory left with zero evidence is also deleted; memories that still have another receipt survive. The purge deliberately does **not** silently delete Coven Registry or private identity/consent rows.
+
+`member-data-id` and `delete-member-id` provide the same private controls for departed/archived users who are no longer selectable as `discord.Member`.
 
 See `docs/memory_controls.md` and `docs/memory_ledger.md` for the privacy and data-control contract.
 
