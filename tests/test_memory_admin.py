@@ -272,7 +272,14 @@ def test_member_inventory_and_purge_include_cross_subject_authored_receipts(data
         surviving_receipts = memory_ledger.list_receipts(connection, shared.memory.id)
         assert len(surviving_receipts) == 1
         assert surviving_receipts[0].author_user_id == 3
-        assert memory_ledger.get_memory(connection, founder_only_evidence.memory.id) is None
+        assert (
+            memory_ledger.get_memory(
+                connection,
+                founder_only_evidence.memory.id,
+                required=False,
+            )
+            is None
+        )
 
         assert coven_registry.get_entry(
             connection,
