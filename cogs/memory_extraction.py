@@ -9,7 +9,7 @@ import discord
 from discord.ext import commands, tasks
 
 from services import ai, memory_extraction, memory_extraction_provider, memory_ledger, memory_policy
-from services import member_profiles
+from services import memory_reconciliation, member_profiles
 from services.database import initialize_database, managed_connection, utc_now_iso
 
 logger = logging.getLogger("wilhelmina.memory.events")
@@ -257,7 +257,7 @@ class MemoryExtraction(commands.Cog):
                     result.payload,
                     mentioned_member_ids=mentioned_ids,
                 )
-                memory_extraction.apply_proposal(
+                memory_reconciliation.apply_proposal(
                     connection,
                     job=current,
                     proposal=proposal,
