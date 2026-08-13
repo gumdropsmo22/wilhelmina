@@ -65,10 +65,18 @@ def apply_proposal(
         else job.content
     )
     touched: set[int] = set()
+    ordinary_topics: set[str] = set()
 
     for candidate in proposal.candidates:
         if candidate.confidence < memory_extraction.MIN_CONFIDENCE:
             continue
+        if candidate.category != "Gossip":
+            if candidate.topic_key in ordinary_topics:
+                raise memory_extraction.InvalidProposal(
+                    "one proposal cannot contain multiple ordinary candidates for the same topic"
+                )
+            ordinary_topics.add(candidate.topic_key)
+
         result = memory_ledger.add_memory(
             connection,
             guild_id=job.guild_id,
