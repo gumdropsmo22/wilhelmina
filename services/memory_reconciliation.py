@@ -110,6 +110,13 @@ def apply_proposal(
     removed_receipts = 0
     deleted_orphans = 0
     for memory_id in sorted(previous_memory_ids - touched):
+        # The canonical Ledger API may already have removed this record as part of a
+        # same-topic correction. In that case its dependent receipt disappeared via
+        # cascade and reconciliation has nothing left to clean up.
+        existing = memory_ledger.get_memory(connection, memory_id, required=False)
+        if existing is None:
+            continue
+
         cursor = connection.execute(
             """
             DELETE FROM memory_receipts
