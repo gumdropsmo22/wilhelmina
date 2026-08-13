@@ -6,7 +6,7 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from services import memory_ledger
 from services.database import utc_now_iso
@@ -30,6 +30,10 @@ TOKEN_PATTERNS = (
     ),
 )
 
+AUTO_CATEGORIES = tuple(
+    value for value in memory_ledger.VALID_CATEGORIES if value != "Admin note"
+)
+
 EXTRACTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -37,6 +41,7 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
     "properties": {
         "candidates": {
             "type": "array",
+            "maxItems": MAX_CANDIDATES,
             "items": {
                 "type": "object",
                 "additionalProperties": False,
@@ -50,20 +55,27 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
                     "entities",
                 ],
                 "properties": {
-                    "category": {"type": "string", "enum": list(memory_ledger.VALID_CATEGORIES)},
-                    "epistemic_label": {"type": "string", "enum": list(memory_ledger.VALID_LABELS)},
+                    "category": {"type": "string", "enum": list(AUTO_CATEGORIES)},
+                    "epistemic_label": {
+                        "type": "string",
+                        "enum": list(memory_ledger.VALID_LABELS),
+                    },
                     "summary": {"type": "string"},
                     "topic_key": {"type": "string"},
-                    "importance": {"type": "integer"},
-                    "confidence": {"type": "integer"},
+                    "importance": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
                     "entities": {
                         "type": "array",
+                        "maxItems": MAX_ENTITIES_PER_CANDIDATE,
                         "items": {
                             "type": "object",
                             "additionalProperties": False,
                             "required": ["type", "key"],
                             "properties": {
-                                "type": {"type": "string", "enum": ["member", "term"]},
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["member", "term"],
+                                },
                                 "key": {"type": "string"},
                             },
                         },
@@ -372,14 +384,16 @@ def reset_stale_jobs(connection: sqlite3.Connection) -> int:
 
 
 def claim_next_job(connection: sqlite3.Connection) -> ExtractionJob | None:
+    """Atomically move one ready job into processing within the current transaction."""
+
     initialize_extraction_schema(connection)
     reset_stale_jobs(connection)
     now_dt = _now()
     now = _iso(now_dt)
     row = connection.execute(
         """
-        SELECT * FROM memory_extraction_jobs
-        WHERE status IN ('pending', 'retry') AND available_at <= ?
+        SELECT id FROM memory_extraction_jobs
+        WHERE status IN ('pending', 'retry') AND available_at <= ? AND content IS NOT NULL
         ORDER BY available_at ASC, id ASC
         LIMIT 1
         """,
@@ -388,14 +402,25 @@ def claim_next_job(connection: sqlite3.Connection) -> ExtractionJob | None:
     if row is None:
         return None
     job_id = int(row["id"])
-    connection.execute(
+    cursor = connection.execute(
         """
         UPDATE memory_extraction_jobs
-        SET status = 'processing', attempts = attempts + 1, lease_expires_at = ?, updated_at = ?
+        SET status = 'processing', attempts = attempts + 1,
+            lease_expires_at = ?, updated_at = ?
         WHERE id = ?
+          AND status IN ('pending', 'retry')
+          AND available_at <= ?
+          AND content IS NOT NULL
         """,
-        (_iso(now_dt + timedelta(seconds=LEASE_SECONDS)), now, job_id),
+        (
+            _iso(now_dt + timedelta(seconds=LEASE_SECONDS)),
+            now,
+            job_id,
+            now,
+        ),
     )
+    if int(cursor.rowcount) != 1:
+        return None
     claimed = connection.execute(
         "SELECT * FROM memory_extraction_jobs WHERE id = ?", (job_id,)
     ).fetchone()
@@ -562,99 +587,6 @@ def build_provider_input(
     )
 
 
-def _message_receipts(
-    connection: sqlite3.Connection,
-    *,
-    guild_id: int,
-    message_id: int,
-) -> list[sqlite3.Row]:
-    return connection.execute(
-        """
-        SELECT id, memory_id FROM memory_receipts
-        WHERE guild_id = ? AND message_id = ? AND source_kind = 'discord'
-        ORDER BY id ASC
-        """,
-        (int(guild_id), int(message_id)),
-    ).fetchall()
-
-
-def apply_proposal(
-    connection: sqlite3.Connection,
-    *,
-    job: ExtractionJob,
-    proposal: MemoryProposal,
-    actor_user_id: int,
-) -> ApplyResult:
-    """Apply validated proposals through deterministic Memory Ledger APIs."""
-
-    initialize_extraction_schema(connection)
-    if not job.content:
-        raise ExtractionError("claimed extraction job has no content")
-
-    previous_receipts = _message_receipts(
-        connection,
-        guild_id=job.guild_id,
-        message_id=job.message_id,
-    )
-    previous_memory_ids = {int(row["memory_id"]) for row in previous_receipts}
-    touched: set[int] = set()
-
-    for candidate in proposal.candidates:
-        if candidate.confidence < MIN_CONFIDENCE:
-            continue
-        result = memory_ledger.add_memory(
-            connection,
-            guild_id=job.guild_id,
-            subject_user_id=job.subject_user_id,
-            category=candidate.category,
-            epistemic_label=candidate.epistemic_label,
-            summary=candidate.summary,
-            actor_user_id=actor_user_id,
-            topic_key=candidate.topic_key,
-            author_user_id=job.author_user_id,
-            channel_id=job.channel_id,
-            message_id=job.message_id,
-            jump_url=job.jump_url,
-            excerpt=job.content,
-            source_created_at=job.source_created_at,
-            source_context=job.source_context,
-            privacy_class="ordinary",
-            reveal_scope="cross_member",
-            importance=candidate.importance,
-        )
-        touched.add(result.memory.id)
-        memory_ledger.set_memory_entities(
-            connection,
-            memory_id=result.memory.id,
-            entities=[(entity.entity_type, entity.entity_key) for entity in candidate.entities],
-        )
-
-    removed_receipts = 0
-    deleted_orphans = 0
-    for memory_id in sorted(previous_memory_ids - touched):
-        cursor = connection.execute(
-            """
-            DELETE FROM memory_receipts
-            WHERE memory_id = ? AND guild_id = ? AND message_id = ? AND source_kind = 'discord'
-            """,
-            (int(memory_id), int(job.guild_id), int(job.message_id)),
-        )
-        removed_receipts += int(cursor.rowcount)
-        remaining = connection.execute(
-            "SELECT COUNT(*) AS count FROM memory_receipts WHERE memory_id = ?",
-            (int(memory_id),),
-        ).fetchone()
-        if remaining is not None and int(remaining["count"]) == 0:
-            memory_ledger.delete_memory(
-                connection,
-                memory_id=memory_id,
-                actor_user_id=actor_user_id,
-            )
-            deleted_orphans += 1
-
-    return ApplyResult(tuple(sorted(touched)), removed_receipts, deleted_orphans)
-
-
 def mark_source_edited(
     connection: sqlite3.Connection,
     *,
@@ -680,15 +612,24 @@ def mark_source_deleted(
     message_id: int,
     deleted_at: str | None = None,
 ) -> int:
+    """Clear queued source text and make outstanding work terminal before marking receipts."""
+
     initialize_extraction_schema(connection)
+    timestamp = utc_now_iso()
     connection.execute(
         """
         UPDATE memory_extraction_jobs
-        SET content = NULL, status = CASE WHEN status = 'processing' THEN 'failed' ELSE status END,
-            lease_expires_at = NULL, last_error_code = 'source_deleted', updated_at = ?
+        SET content = NULL,
+            status = CASE
+                WHEN status IN ('pending', 'processing', 'retry') THEN 'rejected'
+                ELSE status
+            END,
+            lease_expires_at = NULL,
+            last_error_code = 'source_deleted',
+            updated_at = ?
         WHERE guild_id = ? AND message_id = ?
         """,
-        (utc_now_iso(), int(guild_id), int(message_id)),
+        (timestamp, int(guild_id), int(message_id)),
     )
     return memory_ledger.mark_message_deleted(
         connection,
