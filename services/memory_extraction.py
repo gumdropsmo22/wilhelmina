@@ -17,6 +17,8 @@ MAX_ENTITIES_PER_CANDIDATE = 12
 MIN_CONFIDENCE = 70
 MAX_ATTEMPTS = 4
 LEASE_SECONDS = 45
+QUEUE_CONTENT_TTL_SECONDS = 3600
+SENSITIVE_EDIT_MARKER = "[edited content withheld by sensitive-data guard]"
 VALID_JOB_STATES = ("pending", "processing", "retry", "completed", "rejected", "failed")
 
 TOKEN_PATTERNS = (
@@ -383,11 +385,99 @@ def reset_stale_jobs(connection: sqlite3.Connection) -> int:
     return int(cursor.rowcount)
 
 
+def expire_stale_jobs(connection: sqlite3.Connection) -> int:
+    """Drop transient source text that could not be processed within the TTL."""
+
+    initialize_extraction_schema(connection)
+    reset_stale_jobs(connection)
+    now = _now()
+    cutoff = _iso(now - timedelta(seconds=QUEUE_CONTENT_TTL_SECONDS))
+    timestamp = _iso(now)
+    cursor = connection.execute(
+        """
+        UPDATE memory_extraction_jobs
+        SET status = 'rejected', content = NULL, lease_expires_at = NULL,
+            last_error_code = 'queue_expired', updated_at = ?
+        WHERE status IN ('pending', 'retry')
+          AND content IS NOT NULL
+          AND updated_at <= ?
+        """,
+        (timestamp, cutoff),
+    )
+    return int(cursor.rowcount)
+
+
+def cancel_source_job(
+    connection: sqlite3.Connection,
+    *,
+    guild_id: int,
+    message_id: int,
+    reason: str,
+) -> int:
+    """Make outstanding work for a source message terminal and erase queued text."""
+
+    initialize_extraction_schema(connection)
+    cursor = connection.execute(
+        """
+        UPDATE memory_extraction_jobs
+        SET status = CASE
+                WHEN status IN ('pending', 'processing', 'retry') THEN 'rejected'
+                ELSE status
+            END,
+            content = NULL,
+            lease_expires_at = NULL,
+            last_error_code = ?,
+            updated_at = ?
+        WHERE guild_id = ? AND message_id = ?
+        """,
+        (reason[:100], utc_now_iso(), int(guild_id), int(message_id)),
+    )
+    return int(cursor.rowcount)
+
+
+def maintain_source_edit(
+    connection: sqlite3.Connection,
+    *,
+    guild_id: int,
+    message_id: int,
+    edited_excerpt: str,
+    edited_at: str,
+) -> bool:
+    """Cancel stale work and maintain receipt edit state without persisting blocked text."""
+
+    cancel_source_job(
+        connection,
+        guild_id=guild_id,
+        message_id=message_id,
+        reason="source_edited",
+    )
+    try:
+        cleaned = guard_extractable_text(edited_excerpt)
+    except memory_ledger.BlockedMemoryContent:
+        memory_ledger.mark_message_edited(
+            connection,
+            guild_id=guild_id,
+            message_id=message_id,
+            edited_excerpt=SENSITIVE_EDIT_MARKER,
+            edited_at=edited_at,
+        )
+        return False
+
+    memory_ledger.mark_message_edited(
+        connection,
+        guild_id=guild_id,
+        message_id=message_id,
+        edited_excerpt=cleaned,
+        edited_at=edited_at,
+    )
+    return True
+
+
 def claim_next_job(connection: sqlite3.Connection) -> ExtractionJob | None:
     """Atomically move one ready job into processing within the current transaction."""
 
     initialize_extraction_schema(connection)
-    reset_stale_jobs(connection)
+    expire_stale_jobs(connection)
     now_dt = _now()
     now = _iso(now_dt)
     row = connection.execute(
@@ -614,22 +704,11 @@ def mark_source_deleted(
 ) -> int:
     """Clear queued source text and make outstanding work terminal before marking receipts."""
 
-    initialize_extraction_schema(connection)
-    timestamp = utc_now_iso()
-    connection.execute(
-        """
-        UPDATE memory_extraction_jobs
-        SET content = NULL,
-            status = CASE
-                WHEN status IN ('pending', 'processing', 'retry') THEN 'rejected'
-                ELSE status
-            END,
-            lease_expires_at = NULL,
-            last_error_code = 'source_deleted',
-            updated_at = ?
-        WHERE guild_id = ? AND message_id = ?
-        """,
-        (timestamp, int(guild_id), int(message_id)),
+    cancel_source_job(
+        connection,
+        guild_id=guild_id,
+        message_id=message_id,
+        reason="source_deleted",
     )
     return memory_ledger.mark_message_deleted(
         connection,
