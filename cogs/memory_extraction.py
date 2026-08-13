@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,6 +62,31 @@ class MemoryExtraction(commands.Cog):
 
     def cog_unload(self) -> None:
         self.worker.cancel()
+
+    def _job_authorized(
+        self,
+        connection: sqlite3.Connection,
+        job: memory_extraction.ExtractionJob,
+    ) -> bool:
+        """Re-check mutable collection authority before provider use or mutation."""
+
+        home_guild_id = getattr(self.bot.settings, "home_guild_id", None)
+        if home_guild_id is None or int(home_guild_id) != int(job.guild_id):
+            return False
+        try:
+            runtime = memory_policy.MemoryRuntimePolicy.from_env()
+        except memory_policy.MemoryPolicyConfigurationError:
+            return False
+        if not runtime.interaction_collection_enabled:
+            return False
+        settings = memory_ledger.get_or_create_settings(connection, int(home_guild_id))
+        if not settings.collection_enabled:
+            return False
+        return member_profiles.profile_has_current_consent(
+            connection,
+            guild_id=int(home_guild_id),
+            user_id=job.subject_user_id,
+        )
 
     async def _eligibility(self, message: discord.Message) -> Eligibility:
         if self.bot.user is None:
@@ -132,14 +158,6 @@ class MemoryExtraction(commands.Cog):
         try:
             initialize_database(_database_path(self.bot))
             with managed_connection(_database_path(self.bot)) as connection:
-                if edited:
-                    memory_extraction.mark_source_edited(
-                        connection,
-                        guild_id=eligibility.guild_id,
-                        message_id=message.id,
-                        edited_excerpt=content,
-                        edited_at=edited_at or utc_now_iso(),
-                    )
                 memory_extraction.enqueue_message(
                     connection,
                     guild_id=eligibility.guild_id,
@@ -174,6 +192,35 @@ class MemoryExtraction(commands.Cog):
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message) -> None:
         if before.content == after.content:
+            return
+        if after.author.bot or after.webhook_id is not None:
+            return
+        home_guild_id = getattr(self.bot.settings, "home_guild_id", None)
+        if home_guild_id is None:
+            return
+        if after.guild is not None and int(after.guild.id) != int(home_guild_id):
+            return
+
+        edited_at = (
+            after.edited_at.isoformat(timespec="seconds")
+            if after.edited_at is not None
+            else utc_now_iso()
+        )
+        initialize_database(_database_path(self.bot))
+        with managed_connection(_database_path(self.bot)) as connection:
+            safe_to_requeue = memory_extraction.maintain_source_edit(
+                connection,
+                guild_id=int(home_guild_id),
+                message_id=after.id,
+                edited_excerpt=str(after.content or ""),
+                edited_at=edited_at,
+            )
+        if not safe_to_requeue:
+            logger.info(
+                "memory_extraction_edit_rejected reason=sensitive_guard guild_id=%s message_id=%s",
+                home_guild_id,
+                after.id,
+            )
             return
         await self._enqueue(after, edited=True)
 
@@ -213,11 +260,21 @@ class MemoryExtraction(commands.Cog):
 
     @tasks.loop(seconds=2.0)
     async def worker(self) -> None:
-        if self.bot.user is None or not memory_extraction_provider.provider_ready():
-            return
         initialize_database(_database_path(self.bot))
         with managed_connection(_database_path(self.bot)) as connection:
+            memory_extraction.expire_stale_jobs(connection)
+        if self.bot.user is None or not memory_extraction_provider.provider_ready():
+            return
+
+        with managed_connection(_database_path(self.bot)) as connection:
             job = memory_extraction.claim_next_job(connection)
+            if job is not None and not self._job_authorized(connection, job):
+                memory_extraction.mark_job_rejected(
+                    connection,
+                    job.id,
+                    reason="authorization_changed",
+                )
+                job = None
         if job is None or not job.content:
             return
 
@@ -244,6 +301,13 @@ class MemoryExtraction(commands.Cog):
                 or current.content_hash != job.content_hash
                 or current.status != "processing"
             ):
+                return
+            if not self._job_authorized(connection, current):
+                memory_extraction.mark_job_rejected(
+                    connection,
+                    current.id,
+                    reason="authorization_changed",
+                )
                 return
             if result is None:
                 memory_extraction.mark_job_retry(
@@ -293,4 +357,5 @@ async def setup(bot: commands.Bot) -> None:
     initialize_database(_database_path(bot))
     with managed_connection(_database_path(bot)) as connection:
         memory_extraction.initialize_extraction_schema(connection)
+        memory_extraction.expire_stale_jobs(connection)
     await bot.add_cog(MemoryExtraction(bot))
