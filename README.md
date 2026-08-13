@@ -19,6 +19,7 @@ cogs.core          /about, /uptime
 cogs.admin         /admin diagnostics, /admin features, /admin sync, /admin config ...
 cogs.help          /help
 cogs.rules         /rules, /rules-admin ...
+cogs.memory_admin  /memory-admin ...
 cogs.invite        /invite
 cogs.roll          /roll
 cogs.eight_ball    /8ball
@@ -31,6 +32,7 @@ Each optional feature has its own flag:
 ```env
 ENABLE_HELP=true
 ENABLE_RULES=true
+ENABLE_MEMORY_ADMIN=true
 ENABLE_INVITE=false
 ENABLE_ROLL=false
 ENABLE_EIGHT_BALL=false
@@ -101,13 +103,14 @@ ENABLE_CORE=true
 ENABLE_ADMIN=true
 ENABLE_HELP=true
 ENABLE_RULES=true
+ENABLE_MEMORY_ADMIN=true
 ```
 
 `DEV_GUILD_ID` is accepted as a legacy alias for `HOME_GUILD_ID`, but new setups should use `HOME_GUILD_ID`.
 
 ## SQLite persistence
 
-Wilhelmina stores dedicated-server configuration, administrative audit events, onboarding state, rules versions, rules acceptance records, and broadcast state in SQLite.
+Wilhelmina stores dedicated-server configuration, administrative audit events, onboarding state, rules versions, rules acceptance records, broadcast state, private identity data, and the Memory Ledger in SQLite.
 
 ```env
 DATABASE_PATH=data/wilhelmina.sqlite3
@@ -115,7 +118,7 @@ DATABASE_PATH=data/wilhelmina.sqlite3
 
 Relative paths resolve from the repository root. The SQLite file is local runtime state and should be backed up before deployment moves, schema changes, or manual database edits.
 
-Current persistence stores:
+Current persistence stores include:
 
 ```txt
 guild_config
@@ -126,6 +129,15 @@ rules_acceptance
 broadcast_settings
 broadcast_runs
 broadcast_text_history
+coven_registry_entries
+coven_profile_shells
+coven_member_identity_profiles
+memory_ledger_settings
+memory_records
+memory_receipts
+memory_contradictions
+memory_entities
+memory_search
 schema_migrations
 ```
 
@@ -169,6 +181,41 @@ The `/admin config` commands are administrator-only and always respond ephemeral
 ```
 
 These commands only store, clear, validate, and audit configuration. They do **not** create roles, create channels, assign roles, onboard users, mutate permissions, schedule jobs, or transform a server.
+
+## Memory Ledger admin controls
+
+`cogs.memory_admin` adds the private `/memory-admin` surface. It is restricted to administrators in `HOME_GUILD_ID`, and every response is ephemeral.
+
+Core commands:
+
+```txt
+/memory-admin status
+/memory-admin pause
+/memory-admin resume
+/memory-admin set-channel
+/memory-admin clear-channel
+/memory-admin profile
+/memory-admin show
+/memory-admin receipts
+/memory-admin search
+/memory-admin add
+/memory-admin edit
+/memory-admin delete
+/memory-admin member-data
+/memory-admin member-data-id
+/memory-admin delete-member
+/memory-admin delete-member-id
+```
+
+The persistent pause/resume switch is separate from `MEMORY_COLLECTION_MODE`. Resuming the local gate does not activate automatic extraction by itself. Search and inspection are local SQLite operations; Phase 3 does not call OpenAI and does not need an API key.
+
+Exact duplicate admin writes still merge receipts. Their privacy metadata may tighten but never loosen: a later restricted/admin-only confirmation can narrow an existing ordinary record, while a broader duplicate cannot reopen a record that is already narrower. The command reports the actual stored privacy/reveal scope and importance.
+
+Single-memory deletion requires the exact confirmation text `DELETE`. Member-wide Memory Ledger deletion requires `DELETE MEMBER`. The member-wide purge removes the member's own Memory Ledger records **and** receipts they authored on other members' memories. Any memory left with zero evidence is also deleted; memories that still have another receipt survive. The purge deliberately does **not** silently delete Coven Registry or private identity/consent rows.
+
+`member-data-id` and `delete-member-id` provide the same private controls for departed/archived users who are no longer selectable as `discord.Member`.
+
+See `docs/memory_controls.md` and `docs/memory_ledger.md` for the privacy and data-control contract.
 
 ## Scheduled Daily Broadcasts
 
@@ -270,6 +317,7 @@ Optional cogs:
 ```env
 ENABLE_HELP=true
 ENABLE_RULES=true
+ENABLE_MEMORY_ADMIN=true
 ENABLE_INVITE=false
 ENABLE_ROLL=false
 ENABLE_EIGHT_BALL=false
