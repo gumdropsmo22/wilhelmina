@@ -10,7 +10,7 @@ import discord
 from discord.ext import commands, tasks
 
 from services import ai, memory_extraction, memory_extraction_provider, memory_ledger, memory_policy
-from services import memory_reconciliation, member_profiles
+from services import memory_extraction_retention, memory_reconciliation, member_profiles
 from services.database import initialize_database, managed_connection, utc_now_iso
 
 logger = logging.getLogger("wilhelmina.memory.events")
@@ -262,7 +262,7 @@ class MemoryExtraction(commands.Cog):
     async def worker(self) -> None:
         initialize_database(_database_path(self.bot))
         with managed_connection(_database_path(self.bot)) as connection:
-            memory_extraction.expire_stale_jobs(connection)
+            memory_extraction_retention.expire_transient_source_text(connection)
         if self.bot.user is None or not memory_extraction_provider.provider_ready():
             return
 
@@ -357,5 +357,5 @@ async def setup(bot: commands.Bot) -> None:
     initialize_database(_database_path(bot))
     with managed_connection(_database_path(bot)) as connection:
         memory_extraction.initialize_extraction_schema(connection)
-        memory_extraction.expire_stale_jobs(connection)
+        memory_extraction_retention.expire_transient_source_text(connection)
     await bot.add_cog(MemoryExtraction(bot))
