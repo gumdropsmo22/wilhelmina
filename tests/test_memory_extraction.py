@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
-
 import pytest
 
 from services import coven_registry, memory_extraction, memory_ledger, memory_reconciliation
@@ -41,7 +39,13 @@ def _enqueue(connection, *, content: str, edited_at: str | None = None):
     )
 
 
-def _proposal(*, category="Preference", label="Fact", summary="Prefers tea", topic="drink.tea"):
+def _proposal(
+    *,
+    category="Preference",
+    label="Fact",
+    summary="Prefers tea",
+    topic="drink.tea",
+):
     return memory_extraction.parse_proposal(
         {
             "candidates": [
@@ -75,6 +79,17 @@ def test_schema_v10_and_queue_initialize_idempotently(database_path):
         }
     assert "memory_extraction_jobs" in tables
     assert memory_extraction.MEMORY_EXTRACTION_SCHEMA_VERSION in versions
+
+
+def test_structured_schema_excludes_admin_notes_and_bounds_arrays():
+    candidate_schema = memory_extraction.EXTRACTION_SCHEMA["properties"]["candidates"]
+    assert candidate_schema["maxItems"] == memory_extraction.MAX_CANDIDATES
+    item = candidate_schema["items"]
+    assert "Admin note" not in item["properties"]["category"]["enum"]
+    assert (
+        item["properties"]["entities"]["maxItems"]
+        == memory_extraction.MAX_ENTITIES_PER_CANDIDATE
+    )
 
 
 def test_sensitive_guard_rejects_before_queue(database_path):
@@ -112,6 +127,25 @@ def test_enqueue_is_idempotent_and_edit_requeues_latest_content(database_path):
     assert edited.attempts == 0
     assert edited.content == "Actually I hate tea"
     assert edited.content_hash != first.content_hash
+
+
+def test_source_delete_makes_pending_job_terminal_and_unclaimable(database_path):
+    with managed_connection(database_path) as connection:
+        pending = _enqueue(connection, content="I prefer tea")
+        changed = memory_extraction.mark_source_deleted(
+            connection,
+            guild_id=100,
+            message_id=500,
+            deleted_at="2026-08-13T10:01:00+00:00",
+        )
+        deleted = memory_extraction.get_job(connection, pending.id)
+        next_job = memory_extraction.claim_next_job(connection)
+    assert changed == 0
+    assert deleted is not None
+    assert deleted.status == "rejected"
+    assert deleted.content is None
+    assert deleted.last_error_code == "source_deleted"
+    assert next_job is None
 
 
 def test_failed_provider_retries_then_clears_content_at_terminal_failure(database_path):
@@ -186,7 +220,9 @@ def test_gossip_is_normalized_and_low_confidence_is_not_applied(database_path):
             actor_user_id=999,
         )
         memories = memory_ledger.list_profile(
-            connection, guild_id=100, subject_user_id=2
+            connection,
+            guild_id=100,
+            subject_user_id=2,
         )
     assert result.touched_memory_ids == ()
     assert memories == []
@@ -213,7 +249,9 @@ def test_apply_creates_memory_receipt_and_entities(database_path):
     assert memory.reveal_scope == "cross_member"
     assert receipts[0].original_excerpt == "I prefer tea"
     assert {entity.entity_key for entity in entities} >= {"tea", "drink.tea"}
-    assert completed is not None and completed.status == "completed" and completed.content is None
+    assert completed is not None
+    assert completed.status == "completed"
+    assert completed.content is None
 
 
 def test_edit_replaces_same_topic_but_preserves_original_and_latest_receipt(database_path):
@@ -266,7 +304,7 @@ def test_edit_replaces_same_topic_but_preserves_original_and_latest_receipt(data
     assert receipts[0].source_edited_at == "2026-08-13T10:05:00+00:00"
 
 
-def test_source_delete_marks_receipt_and_clears_queued_content(database_path):
+def test_source_delete_marks_receipt_and_clears_processing_job(database_path):
     with managed_connection(database_path) as connection:
         _enqueue(connection, content="I prefer tea")
         job = memory_extraction.claim_next_job(connection)
@@ -287,4 +325,7 @@ def test_source_delete_marks_receipt_and_clears_queued_content(database_path):
         queued = memory_extraction.get_job(connection, job.id)
     assert changed == 1
     assert receipt.source_deleted_at == "2026-08-13T11:00:00+00:00"
-    assert queued is not None and queued.content is None
+    assert queued is not None
+    assert queued.status == "rejected"
+    assert queued.content is None
+    assert queued.last_error_code == "source_deleted"
