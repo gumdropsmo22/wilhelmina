@@ -33,6 +33,8 @@ If any gate fails, private content does not enter OpenAI extraction.
 
 `ENABLE_MEMORY_EXTRACTION` defaults to `false`. Enabling it also requests Discord's Message Content gateway intent. Configure that intent in the Discord Developer Portal before enabling the feature in a deployment.
 
+Mutable authorization is checked more than once. A queued job re-checks the current runtime mode, persistent pause/resume state, home guild, and current memory consent immediately before the provider request and again immediately before any SQLite mutation. A pause or consent change while OpenAI is processing therefore causes the job to be rejected rather than applied.
+
 ## Eligible Discord text
 
 Phase 4 collects only human-authored text in the dedicated home server context:
@@ -58,6 +60,20 @@ Blocked content is not enqueued and is not sent to OpenAI.
 
 The model output is checked by the same guard again before any memory mutation. A model cannot reintroduce prohibited content through its summary.
 
+### Sensitive edits
+
+Message edits are source-maintenance events before they are new extraction opportunities. An edit first cancels any outstanding queued version of that message and clears its queued source text.
+
+If the new edit is safe, existing receipts record the latest edited wording and the message may be requeued only if current eligibility and provider gates still pass.
+
+If the new edit trips the local sensitive-data guard, the sensitive text is not queued and is not copied into the receipt. The receipt stores only:
+
+```txt
+[edited content withheld by sensitive-data guard]
+```
+
+This prevents an already queued pre-edit version from being processed later while also preventing the new secret from being persisted as extraction source text.
+
 ## Durable queue
 
 Schema version 10 adds `memory_extraction_jobs`.
@@ -73,9 +89,15 @@ States:
 - `rejected`
 - `failed`
 
-The queue stores source text only while work is outstanding. Completed, rejected, terminally failed, and source-deleted jobs clear the queued text. A SHA-256 content hash supports idempotency and prevents stale provider results from overwriting a newer edit.
+The queue stores source text only while work is outstanding. Completed, rejected, terminally failed, edited-away, and source-deleted jobs clear the queued text. A SHA-256 content hash supports idempotency and prevents stale provider results from overwriting a newer edit.
 
 Processing leases recover jobs after an interrupted worker. Provider/apply failures retry with bounded exponential backoff and become terminal after four attempts.
+
+### Transient raw-text lifetime
+
+Outstanding source text is transient queue material, not canonical memory. `services.memory_extraction_retention` enforces a one-hour absolute lifetime for unprocessed raw source text. Retry bookkeeping does not extend that window. Initial messages age from queue insertion; a genuine Discord edit resets the clock from the source edit timestamp.
+
+The cleanup runs at extractor startup and before each worker pass, including while the provider is unavailable. Expired jobs become `rejected`, clear `content`, and retain only content-free queue metadata such as IDs, state, timestamps, and error code.
 
 ## Structured OpenAI extraction
 
@@ -111,6 +133,8 @@ Member entity IDs are accepted only when the source message explicitly mentioned
 
 Candidates below confidence 70 are ignored rather than persisted.
 
+A single proposal cannot contain multiple accepted ordinary memories for the same normalized topic. That conflict is rejected during a preflight pass before any Memory Ledger mutation. Gossip is exempt because conflicting attributed gossip is intentionally allowed to coexist.
+
 ## Deterministic reconciliation
 
 `services.memory_reconciliation` is the mutation authority for extractor proposals.
@@ -128,7 +152,7 @@ When an edited source changes what should be remembered, obsolete source receipt
 
 ### Edited-source evidence
 
-Edits preserve both versions:
+Edits preserve both versions when the latest text remains safe to retain:
 
 - `original_excerpt` keeps the first wording;
 - `edited_excerpt` keeps the latest processed wording;
@@ -136,9 +160,11 @@ Edits preserve both versions:
 
 If a correction replaces the old memory record, reconciliation transfers the original source wording onto the corrected record's receipt before the obsolete record is removed.
 
+Sensitive edits use the redaction marker described above instead of storing the blocked latest text.
+
 ### Deleted sources
 
-Discord deletion events do not erase the receipt. They set `source_deleted_at`, preserving the previously captured evidence as required by the Memory Ledger contract. Any outstanding queued source text is cleared.
+Discord deletion events do not erase the receipt. They set `source_deleted_at`, preserving the previously captured evidence as required by the Memory Ledger contract. Any outstanding queued source text is cleared and outstanding work becomes terminal.
 
 ## Failure behavior
 
@@ -148,8 +174,14 @@ The feature fails closed:
 - collection off/paused -> no queue;
 - private OpenAI retention gate unavailable -> no queue;
 - sensitive source -> no queue;
+- safe edit while provider is unavailable -> old outstanding queue is cancelled, receipt maintenance still occurs, and no new queue is created;
+- sensitive edit -> old outstanding queue is cancelled, new secret is not persisted, receipt gets the safe marker;
+- queued job loses consent/pause/runtime authorization before provider -> reject before provider;
+- authorization changes while provider is running -> reject before mutation;
 - provider outage after enqueue -> retry;
+- unprocessed raw source text older than one hour -> reject and erase source text;
 - invalid structured proposal -> reject without mutation;
+- conflicting ordinary same-topic candidates -> reject during preflight before mutation;
 - edited message wins over stale in-flight provider response through content-hash comparison;
 - source deletion clears queued text and marks existing receipts deleted.
 
@@ -188,12 +220,16 @@ Regression coverage includes:
 - schema v10 and idempotent queue initialization;
 - pre-AI sensitive-data rejection;
 - idempotent enqueue/edit requeue;
-- retries and terminal text clearing;
+- bounded retries and terminal text clearing;
+- absolute transient queue-text retention that retry bookkeeping cannot extend;
+- safe and sensitive edit cancellation/redaction behavior;
 - strict proposal validation;
+- preflight same-topic conflict rejection before mutation;
 - gossip normalization and confidence threshold;
 - deterministic memory/receipt/entity creation;
 - same-topic edit correction with original/latest evidence preservation;
 - source deletion handling;
+- mutable pause/authorization re-checks;
 - consent/runtime/pause/home-guild/interaction eligibility;
 - ambient-mode non-activation;
 - strict provider schema + `store=False` request shape;
