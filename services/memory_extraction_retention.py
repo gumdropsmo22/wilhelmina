@@ -12,14 +12,15 @@ def expire_transient_source_text(
     *,
     ttl_seconds: int = memory_extraction.QUEUE_CONTENT_TTL_SECONDS,
 ) -> int:
-    """Erase unprocessed source text after an absolute queue/edit age threshold.
+    """Erase outstanding source text after an absolute queue/edit age threshold.
 
-    Retry bookkeeping must not extend the retention window. Initial messages age from the
-    queue row's creation time; edited messages age from the source edit timestamp.
+    Retry bookkeeping and provider processing must not extend the retention window. Initial
+    messages age from the queue row's creation time; edited messages age from the source edit
+    timestamp. Expiring a processing row also revokes its claim token so a late provider result
+    cannot mutate the Memory Ledger.
     """
 
     memory_extraction.initialize_extraction_schema(connection)
-    memory_extraction.reset_stale_jobs(connection)
     cutoff = (datetime.now(UTC) - timedelta(seconds=int(ttl_seconds))).isoformat(
         timespec="seconds"
     )
@@ -27,8 +28,8 @@ def expire_transient_source_text(
         """
         UPDATE memory_extraction_jobs
         SET status = 'rejected', content = NULL, lease_expires_at = NULL,
-            last_error_code = 'queue_expired', updated_at = ?
-        WHERE status IN ('pending', 'retry')
+            claim_token = NULL, last_error_code = 'queue_expired', updated_at = ?
+        WHERE status IN ('pending', 'processing', 'retry')
           AND content IS NOT NULL
           AND COALESCE(source_edited_at, created_at) <= ?
         """,
