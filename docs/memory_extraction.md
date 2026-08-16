@@ -33,7 +33,7 @@ If any gate fails, private content does not enter OpenAI extraction.
 
 `ENABLE_MEMORY_EXTRACTION` defaults to `false`. Enabling it also requests Discord's Message Content gateway intent. Configure that intent in the Discord Developer Portal before enabling the feature in a deployment.
 
-Mutable authorization is checked more than once. A queued job re-checks the current runtime mode, persistent pause/resume state, home guild, and current memory consent immediately before the provider request and again immediately before any SQLite mutation. A pause or consent change while OpenAI is processing therefore causes the job to be rejected rather than applied.
+Mutable authorization is checked more than once. The event path re-checks home guild, runtime mode, persistent pause/resume state, current consent, and interaction scope inside a SQLite `BEGIN IMMEDIATE` transaction immediately before queue persistence. A claimed job re-checks authorization immediately before the provider request and again inside a write transaction immediately before any Memory Ledger mutation.
 
 ## Eligible Discord text
 
@@ -54,29 +54,41 @@ Even if all future ambient environment gates are set, Phase 4 still rejects unad
 
 ## Sensitive-data guard
 
-`services.memory_extraction.guard_extractable_text()` runs before queue persistence and before an OpenAI request. It composes the Memory Ledger guard with extra local detection for common token formats, government-ID patterns, exact street-address shapes, and Luhn-valid payment-card numbers.
+`services.memory_extraction.guard_extractable_text()` runs before queue persistence and before an OpenAI request. It composes the Memory Ledger guard with deterministic local detection for credentials/secrets, common provider token forms, government/private identifiers, exact street-address shapes, Luhn-valid payment-card numbers, and medical or mental-health diagnosis disclosures.
+
+The guard covers both recognizable secret formats and labelled forms such as access keys, secret access keys, client secrets, private tokens, passports, national IDs, driver licenses, and comparable identifiers. Diagnosis handling combines explicit diagnosis language with disease/disorder/syndrome forms and high-risk named conditions. Sexuality is not treated as a prohibited diagnosis category.
 
 Blocked content is not enqueued and is not sent to OpenAI.
 
-The model output is checked by the same guard again before any memory mutation. A model cannot reintroduce prohibited content through its summary.
+Every model-controlled persisted string is checked again after structured extraction. Summary text, raw topic keys, and term entity keys all pass through the same prohibited-content guard before normalization or Memory Ledger mutation. A model cannot smuggle a credential or diagnosis into metadata after the source text passed inspection.
 
-### Sensitive edits
+### Raw message edits
 
-Message edits are source-maintenance events before they are new extraction opportunities. An edit first cancels any outstanding queued version of that message and clears its queued source text.
+Raw Discord edit events are authoritative because they fire even when the original message is not present in discord.py's cache.
 
-If the new edit is safe, existing receipts record the latest edited wording and the message may be requeued only if current eligibility and provider gates still pass.
+For a known source message, one `BEGIN IMMEDIATE` transaction performs the edit lifecycle:
 
-If the new edit trips the local sensitive-data guard, the sensitive text is not queued and is not copied into the receipt. The receipt stores only:
+1. normalize and compare the Discord edit timestamp;
+2. ignore an older/equal edit if a newer edit version is already recorded;
+3. cancel outstanding queue work and advance the content-free edit version;
+4. re-check runtime/pause/home-guild/current-consent authorization;
+5. only after authorization, inspect the new text with the sensitive-data guard;
+6. update receipt edit text only when authorized;
+7. requeue the newest safe version only when current interaction scope and provider gates still pass.
+
+This ordering prevents a revoked-consent edit from writing new raw text into receipts and prevents two bot processes from letting a late older edit overwrite a newer queued version.
+
+If an authorized edit trips the sensitive-data guard, the raw sensitive text is not queued or copied into the receipt. The receipt stores only:
 
 ```txt
 [edited content withheld by sensitive-data guard]
 ```
 
-This prevents an already queued pre-edit version from being processed later while also preventing the new secret from being persisted as extraction source text.
+If a raw update cannot provide inspectable/versioned edit data, outstanding extraction work is cancelled fail-closed rather than guessed.
 
 ## Durable queue
 
-Schema version 10 adds `memory_extraction_jobs`.
+Schema version 11 owns `memory_extraction_jobs`.
 
 One row represents the latest known version of one Discord source message. The unique key is `(guild_id, source_context, message_id)`.
 
@@ -89,15 +101,34 @@ States:
 - `rejected`
 - `failed`
 
-The queue stores source text only while work is outstanding. Completed, rejected, terminally failed, edited-away, and source-deleted jobs clear the queued text. A SHA-256 content hash supports idempotency and prevents stale provider results from overwriting a newer edit.
+The queue stores source text only while work is outstanding. Completed, rejected, terminally failed, edited-away, and source-deleted jobs clear queued text.
 
-Processing leases recover jobs after an interrupted worker. Provider/apply failures retry with bounded exponential backoff and become terminal after four attempts.
+### Claim ownership
+
+Every transition into `processing` receives a cryptographically random `claim_token`. Completion, rejection, retry, and failure transitions require the exact job ID plus the exact current claim token. Content hash alone is not considered ownership.
+
+If a lease expires, its token is revoked before the job can be reclaimed. A stale provider response from claim A therefore cannot mutate or finish work after claim B owns the row.
+
+Fresh v11 databases also enforce `processing -> claim_token IS NOT NULL` at the table level. Migrated v10 databases install equivalent SQLite triggers so an older v10 worker cannot create a new tokenless processing claim during deployment overlap.
+
+### v10 -> v11 deployment transition
+
+A v10 row already marked `processing` has no trustworthy claim generation. During v11 schema initialization, every such tokenless processing row is fail-closed:
+
+- status becomes `rejected`;
+- transient source text is erased;
+- the lease is cleared;
+- the error code becomes `claim_migration_invalidated`.
+
+The v11 trigger then rejects any later old-style attempt to mark a row `processing` without a token. Deployments should still stop/drain old v10 bot processes before enabling the v11 worker; the database enforcement exists as a second safety boundary rather than permission to intentionally run mixed versions indefinitely.
 
 ### Transient raw-text lifetime
 
-Outstanding source text is transient queue material, not canonical memory. `services.memory_extraction_retention` enforces a one-hour absolute lifetime for unprocessed raw source text. Retry bookkeeping does not extend that window. Initial messages age from queue insertion; a genuine Discord edit resets the clock from the source edit timestamp.
+Outstanding source text is transient queue material, not canonical memory. `services.memory_extraction_retention` enforces a one-hour absolute lifetime for raw source text. Retry bookkeeping and provider processing do not extend that window. Initial messages age from queue insertion; a genuine Discord edit resets the clock from the newest accepted source edit timestamp.
 
-The cleanup runs at extractor startup and before each worker pass, including while the provider is unavailable. Expired jobs become `rejected`, clear `content`, and retain only content-free queue metadata such as IDs, state, timestamps, and error code.
+Retention runs independently from the provider worker as well as during normal worker passes. A provider coroutine therefore cannot hold raw source text past the TTL by remaining in `processing`.
+
+When a processing row expires, retention clears its content and claim token. Any subsequently returned provider result fails ownership validation and is discarded without mutation.
 
 ## Structured OpenAI extraction
 
@@ -152,19 +183,17 @@ When an edited source changes what should be remembered, obsolete source receipt
 
 ### Edited-source evidence
 
-Edits preserve both versions when the latest text remains safe to retain:
+Edits preserve both versions only when current authorization still permits receipt maintenance and the latest text is safe to retain:
 
 - `original_excerpt` keeps the first wording;
-- `edited_excerpt` keeps the latest processed wording;
+- `edited_excerpt` keeps the latest authorized processed wording;
 - `source_edited_at` marks the edit.
 
-If a correction replaces the old memory record, reconciliation transfers the original source wording onto the corrected record's receipt before the obsolete record is removed.
-
-Sensitive edits use the redaction marker described above instead of storing the blocked latest text.
+The queue separately advances its content-free edit timestamp even when a newer edit cannot be retained. That timestamp is used only to stop a stale older handler from resurrecting old text.
 
 ### Deleted sources
 
-Discord deletion events do not erase the receipt. They set `source_deleted_at`, preserving the previously captured evidence as required by the Memory Ledger contract. Any outstanding queued source text is cleared and outstanding work becomes terminal.
+Discord deletion events do not erase the receipt. They set `source_deleted_at`, preserving previously captured evidence as required by the Memory Ledger contract. Any outstanding queued source text is cleared and outstanding work becomes terminal.
 
 ## Failure behavior
 
@@ -174,15 +203,17 @@ The feature fails closed:
 - collection off/paused -> no queue;
 - private OpenAI retention gate unavailable -> no queue;
 - sensitive source -> no queue;
-- safe edit while provider is unavailable -> old outstanding queue is cancelled, receipt maintenance still occurs, and no new queue is created;
-- sensitive edit -> old outstanding queue is cancelled, new secret is not persisted, receipt gets the safe marker;
+- revoked-consent edit -> outstanding job cancelled, edit version advanced, no new receipt text persisted;
+- sensitive authorized edit -> outstanding job cancelled, secret not persisted, receipt gets only the safe marker;
+- stale older raw edit -> ignored without overwriting newer queue/receipt state;
 - queued job loses consent/pause/runtime authorization before provider -> reject before provider;
 - authorization changes while provider is running -> reject before mutation;
 - provider outage after enqueue -> retry;
-- unprocessed raw source text older than one hour -> reject and erase source text;
+- expired lease -> revoke claim token before retry/reclaim;
+- unprocessed or in-flight raw source text older than one hour -> reject, erase text, revoke claim;
 - invalid structured proposal -> reject without mutation;
+- prohibited model metadata -> reject without mutation;
 - conflicting ordinary same-topic candidates -> reject during preflight before mutation;
-- edited message wins over stale in-flight provider response through content-hash comparison;
 - source deletion clears queued text and marks existing receipts deleted.
 
 ## Deployment / rollback
@@ -194,6 +225,14 @@ ENABLE_MEMORY_EXTRACTION=false
 MEMORY_COLLECTION_MODE=off
 OPENAI_RETENTION_MODE=standard
 ```
+
+For the v10 -> v11 rollout:
+
+1. stop or drain old v10 bot workers;
+2. deploy v11 code with extraction still disabled/off;
+3. allow schema initialization to invalidate any leftover tokenless processing rows and install claim-token enforcement triggers;
+4. verify migrations/CI/runtime diagnostics;
+5. enable the intended interaction collection runtime only after the deployment's MAM/ZDR and Discord intent prerequisites are configured.
 
 To roll back collection immediately without changing code, set either:
 
@@ -217,19 +256,23 @@ CI uses mocked OpenAI calls only. No real API key is required.
 
 Regression coverage includes:
 
-- schema v10 and idempotent queue initialization;
-- pre-AI sensitive-data rejection;
+- schema v11 initialization and v10 -> v11 migration;
+- legacy tokenless processing-claim invalidation and old-style claim rejection;
+- pre-AI diagnosis/credential/private-ID/payment/address rejection;
+- post-model summary/topic/entity sensitive-data rejection;
 - idempotent enqueue/edit requeue;
+- exact claim-token ownership across lease expiry/reclaim;
 - bounded retries and terminal text clearing;
-- absolute transient queue-text retention that retry bookkeeping cannot extend;
-- safe and sensitive edit cancellation/redaction behavior;
+- absolute raw-text retention for pending, retry, and in-flight processing rows;
+- uncached/raw sensitive edit cancellation;
+- revoked-consent edit cancellation without receipt-text persistence;
+- out-of-order rapid edit versioning where the newest edit wins;
 - strict proposal validation;
 - preflight same-topic conflict rejection before mutation;
 - gossip normalization and confidence threshold;
 - deterministic memory/receipt/entity creation;
-- same-topic edit correction with original/latest evidence preservation;
 - source deletion handling;
-- mutable pause/authorization re-checks;
+- atomic mutable authorization re-check at enqueue and before mutation;
 - consent/runtime/pause/home-guild/interaction eligibility;
 - ambient-mode non-activation;
 - strict provider schema + `store=False` request shape;
