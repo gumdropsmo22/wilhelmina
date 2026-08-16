@@ -173,6 +173,8 @@ async def test_bot_and_wrong_guild_are_rejected(database_path, monkeypatch):
 async def test_enqueue_rechecks_pause_in_same_write_transaction(database_path, monkeypatch):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
     _grant_consent(database_path)
+    with managed_connection(database_path) as connection:
+        memory_extraction.initialize_extraction_schema(connection)
     cog = _cog(database_path)
     message = _message(mentions=(SimpleNamespace(id=999),))
 
