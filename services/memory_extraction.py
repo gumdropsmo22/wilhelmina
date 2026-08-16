@@ -32,14 +32,17 @@ TOKEN_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b"),
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.IGNORECASE),
     re.compile(
-        r"\b(?:api[ _-]?key|access[ _-]?key|secret[ _-]?key|client[ _-]?secret|"
-        r"private[ _-]?token)\s*(?:is|=|:)\s*[A-Za-z0-9_./+=-]{8,}\b",
+        r"\b(?:(?:aws\s+)?(?:secret\s+access\s+key|access\s+key(?:\s+id)?|"
+        r"session\s+token)|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|"
+        r"secret[ _-]?key|client[ _-]?secret|private[ _-]?token)\b"
+        r"\s*(?:is|=|:)?\s*[A-Za-z0-9_./+=-]{8,}\b",
         re.IGNORECASE,
     ),
     re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
     re.compile(
-        r"\b(?:passport|national[ _-]?id|identity[ _-]?number|driver'?s[ _-]?license|"
-        r"tax[ _-]?id|resident[ _-]?id)\s*(?:number|no\.?|#|is|=|:)\s*[A-Z0-9-]{5,}\b",
+        r"\b(?:passport|national[ _-]?id|identity[ _-]?(?:document|number)|"
+        r"driver(?:'?s)?[ _-]?license|tax[ _-]?id|resident[ _-]?id)\b"
+        r"\s*(?:number|no\.?|#)?\s*(?:is|=|:)?\s*[A-Z0-9-]{5,}\b",
         re.IGNORECASE,
     ),
     re.compile(
@@ -49,10 +52,24 @@ TOKEN_PATTERNS = (
     ),
 )
 
-DIAGNOSIS_PATTERN = re.compile(
-    r"\b(?:HIV|AIDS|bipolar(?: disorder)?|schizophrenia|PTSD|OCD|ADHD|autism|"
-    r"major depressive disorder|depression|anxiety disorder|cancer|diabetes|epilepsy)\b",
-    re.IGNORECASE,
+DIAGNOSIS_PATTERNS = (
+    re.compile(
+        r"\b(?:diagnosed\s+with|diagnosis\s+(?:is|of)|medical\s+condition\s+(?:is|of)|"
+        r"mental[ _-]?health\s+condition\s+(?:is|of))\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:HIV|AIDS|lupus|Parkinson(?:'s)?(?:\s+disease)?|multiple\s+sclerosis|"
+        r"Crohn(?:'s)?(?:\s+disease)?|schizophrenia|bipolar(?:\s+disorder)?|PTSD|OCD|"
+        r"ADHD|autism|major\s+depressive\s+disorder|depression|anxiety\s+disorder|"
+        r"cancer|diabetes|epilepsy|asthma|Tourette(?:'s)?(?:\s+syndrome)?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b[A-Za-z][A-Za-z'-]*(?:\s+[A-Za-z][A-Za-z'-]*){0,3}\s+"
+        r"(?:disease|disorder|syndrome)\b",
+        re.IGNORECASE,
+    ),
 )
 
 AUTO_CATEGORIES = tuple(
@@ -194,6 +211,29 @@ def _iso(value: datetime) -> str:
     return value.isoformat(timespec="seconds")
 
 
+def normalize_source_timestamp(value: str) -> str:
+    """Normalize an offset-aware Discord timestamp for deterministic edit ordering."""
+
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ExtractionError("source edit timestamp is invalid") from exc
+    if parsed.tzinfo is None:
+        raise ExtractionError("source edit timestamp must be timezone-aware")
+    return parsed.astimezone(UTC).isoformat(timespec="seconds")
+
+
+def source_edit_is_newer(job: ExtractionJob, edited_at: str) -> bool:
+    incoming = normalize_source_timestamp(edited_at)
+    if job.source_edited_at is None:
+        return True
+    try:
+        current = normalize_source_timestamp(job.source_edited_at)
+    except ExtractionError:
+        return True
+    return incoming > current
+
+
 def _optional_int(value: object) -> int | None:
     return None if value is None else int(value)
 
@@ -221,6 +261,21 @@ def _row_to_job(row: sqlite3.Row) -> ExtractionJob:
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )
+
+
+def invalidate_legacy_processing_claims(connection: sqlite3.Connection) -> int:
+    """Terminalize tokenless v10 processing rows before v11 workers may reclaim work."""
+
+    cursor = connection.execute(
+        """
+        UPDATE memory_extraction_jobs
+        SET status = 'rejected', content = NULL, lease_expires_at = NULL,
+            claim_token = NULL, last_error_code = 'claim_migration_invalidated', updated_at = ?
+        WHERE status = 'processing' AND claim_token IS NULL
+        """,
+        (utc_now_iso(),),
+    )
+    return int(cursor.rowcount)
 
 
 def initialize_extraction_schema(connection: sqlite3.Connection) -> None:
@@ -253,6 +308,7 @@ def initialize_extraction_schema(connection: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             UNIQUE (guild_id, source_context, message_id),
+            CHECK (status != 'processing' OR claim_token IS NOT NULL),
             CHECK (
                 (source_context = 'guild' AND channel_id IS NOT NULL AND jump_url IS NOT NULL)
                 OR
@@ -267,6 +323,27 @@ def initialize_extraction_schema(connection: sqlite3.Connection) -> None:
     }
     if "claim_token" not in columns:
         connection.execute("ALTER TABLE memory_extraction_jobs ADD COLUMN claim_token TEXT")
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_memory_extraction_processing_token_insert
+        BEFORE INSERT ON memory_extraction_jobs
+        WHEN NEW.status = 'processing' AND NEW.claim_token IS NULL
+        BEGIN
+            SELECT RAISE(ABORT, 'processing extraction jobs require a claim token');
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_memory_extraction_processing_token_update
+        BEFORE UPDATE OF status, claim_token ON memory_extraction_jobs
+        WHEN NEW.status = 'processing' AND NEW.claim_token IS NULL
+        BEGIN
+            SELECT RAISE(ABORT, 'processing extraction jobs require a claim token');
+        END
+        """
+    )
+    invalidate_legacy_processing_claims(connection)
     connection.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_memory_extraction_ready
@@ -298,10 +375,11 @@ def guard_extractable_text(text: str) -> str:
     """Reject prohibited content locally before queueing or external inference."""
 
     cleaned = memory_ledger.validate_extractable_text(text)
-    if DIAGNOSIS_PATTERN.search(cleaned):
-        raise memory_ledger.BlockedMemoryContent(
-            "Message contains prohibited diagnosis information"
-        )
+    for pattern in DIAGNOSIS_PATTERNS:
+        if pattern.search(cleaned):
+            raise memory_ledger.BlockedMemoryContent(
+                "Message contains prohibited diagnosis information"
+            )
     for pattern in TOKEN_PATTERNS:
         if pattern.search(cleaned):
             raise memory_ledger.BlockedMemoryContent(
@@ -342,6 +420,9 @@ def enqueue_message(
     if context == "dm" and jump_url is not None:
         raise ExtractionError("DM extraction jobs must not fabricate jump URLs")
 
+    normalized_edited_at = (
+        normalize_source_timestamp(source_edited_at) if source_edited_at is not None else None
+    )
     digest = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()
     timestamp = utc_now_iso()
     existing = connection.execute(
@@ -392,7 +473,7 @@ def enqueue_message(
             cleaned,
             digest,
             source_created_at,
-            source_edited_at,
+            normalized_edited_at,
             timestamp,
             timestamp,
             timestamp,
@@ -453,10 +534,14 @@ def cancel_source_job(
     guild_id: int,
     message_id: int,
     reason: str,
+    source_edited_at: str | None = None,
 ) -> int:
-    """Make outstanding work for a source message terminal and erase queued text."""
+    """Make outstanding work terminal, erase queued text, and optionally advance edit version."""
 
     initialize_extraction_schema(connection)
+    normalized_edited_at = (
+        normalize_source_timestamp(source_edited_at) if source_edited_at is not None else None
+    )
     cursor = connection.execute(
         """
         UPDATE memory_extraction_jobs
@@ -467,11 +552,18 @@ def cancel_source_job(
             content = NULL,
             lease_expires_at = NULL,
             claim_token = NULL,
+            source_edited_at = COALESCE(?, source_edited_at),
             last_error_code = ?,
             updated_at = ?
         WHERE guild_id = ? AND message_id = ?
         """,
-        (reason[:100], utc_now_iso(), int(guild_id), int(message_id)),
+        (
+            normalized_edited_at,
+            reason[:100],
+            utc_now_iso(),
+            int(guild_id),
+            int(message_id),
+        ),
     )
     return int(cursor.rowcount)
 
@@ -486,11 +578,13 @@ def maintain_source_edit(
 ) -> bool:
     """Cancel stale work and maintain receipt edit state without persisting blocked text."""
 
+    normalized_edited_at = normalize_source_timestamp(edited_at)
     cancel_source_job(
         connection,
         guild_id=guild_id,
         message_id=message_id,
         reason="source_edited",
+        source_edited_at=normalized_edited_at,
     )
     try:
         cleaned = guard_extractable_text(edited_excerpt)
@@ -500,7 +594,7 @@ def maintain_source_edit(
             guild_id=guild_id,
             message_id=message_id,
             edited_excerpt=SENSITIVE_EDIT_MARKER,
-            edited_at=edited_at,
+            edited_at=normalized_edited_at,
         )
         return False
 
@@ -509,7 +603,7 @@ def maintain_source_edit(
         guild_id=guild_id,
         message_id=message_id,
         edited_excerpt=cleaned,
-        edited_at=edited_at,
+        edited_at=normalized_edited_at,
     )
     return True
 
@@ -782,13 +876,14 @@ def mark_source_edited(
     edited_excerpt: str,
     edited_at: str,
 ) -> int:
-    guard_extractable_text(edited_excerpt)
+    cleaned = guard_extractable_text(edited_excerpt)
+    normalized_edited_at = normalize_source_timestamp(edited_at)
     return memory_ledger.mark_message_edited(
         connection,
         guild_id=guild_id,
         message_id=message_id,
-        edited_excerpt=edited_excerpt,
-        edited_at=edited_at,
+        edited_excerpt=cleaned,
+        edited_at=normalized_edited_at,
     )
 
 
