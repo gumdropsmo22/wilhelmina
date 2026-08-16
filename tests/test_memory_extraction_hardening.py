@@ -88,7 +88,8 @@ def test_stale_transient_queue_text_expires_fail_closed(database_path):
         connection.execute(
             """
             UPDATE memory_extraction_jobs
-            SET updated_at = '2000-01-01T00:00:00+00:00'
+            SET created_at = '2000-01-01T00:00:00+00:00',
+                updated_at = '2000-01-01T00:00:00+00:00'
             WHERE id = ?
             """,
             (queued.id,),
