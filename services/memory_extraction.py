@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import secrets
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -11,7 +12,7 @@ from typing import Any, Mapping, Sequence
 from services import memory_ledger
 from services.database import utc_now_iso
 
-MEMORY_EXTRACTION_SCHEMA_VERSION = 10
+MEMORY_EXTRACTION_SCHEMA_VERSION = 11
 MAX_CANDIDATES = 6
 MAX_ENTITIES_PER_CANDIDATE = 12
 MIN_CONFIDENCE = 70
@@ -23,13 +24,35 @@ VALID_JOB_STATES = ("pending", "processing", "retry", "completed", "rejected", "
 
 TOKEN_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
-    re.compile(r"\b(?:ghp_|github_pat_)[A-Za-z0-9_]{20,}\b", re.IGNORECASE),
+    re.compile(r"\b(?:ghp_|github_pat_|glpat-)[A-Za-z0-9_-]{20,}\b", re.IGNORECASE),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
+    re.compile(r"\b(?:sk|rk|pk)_(?:live|test)_[0-9A-Za-z]{16,}\b", re.IGNORECASE),
+    re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b", re.IGNORECASE),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b"),
+    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.IGNORECASE),
+    re.compile(
+        r"\b(?:api[ _-]?key|access[ _-]?key|secret[ _-]?key|client[ _-]?secret|"
+        r"private[ _-]?token)\s*(?:is|=|:)\s*[A-Za-z0-9_./+=-]{8,}\b",
+        re.IGNORECASE,
+    ),
     re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    re.compile(
+        r"\b(?:passport|national[ _-]?id|identity[ _-]?number|driver'?s[ _-]?license|"
+        r"tax[ _-]?id|resident[ _-]?id)\s*(?:number|no\.?|#|is|=|:)\s*[A-Z0-9-]{5,}\b",
+        re.IGNORECASE,
+    ),
     re.compile(
         r"\b\d{1,6}\s+[A-Za-z0-9.' -]{2,60}\s+(?:street|st|road|rd|avenue|ave|"
         r"boulevard|blvd|lane|ln|drive|dr|court|ct)\b",
         re.IGNORECASE,
     ),
+)
+
+DIAGNOSIS_PATTERN = re.compile(
+    r"\b(?:HIV|AIDS|bipolar(?: disorder)?|schizophrenia|PTSD|OCD|ADHD|autism|"
+    r"major depressive disorder|depression|anxiety disorder|cancer|diabetes|epilepsy)\b",
+    re.IGNORECASE,
 )
 
 AUTO_CATEGORIES = tuple(
@@ -150,6 +173,7 @@ class ExtractionJob:
     attempts: int
     available_at: str
     lease_expires_at: str | None
+    claim_token: str | None
     last_error_code: str | None
     created_at: str
     updated_at: str
@@ -192,6 +216,7 @@ def _row_to_job(row: sqlite3.Row) -> ExtractionJob:
         attempts=int(row["attempts"]),
         available_at=str(row["available_at"]),
         lease_expires_at=row["lease_expires_at"],
+        claim_token=row["claim_token"],
         last_error_code=row["last_error_code"],
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
@@ -199,7 +224,7 @@ def _row_to_job(row: sqlite3.Row) -> ExtractionJob:
 
 
 def initialize_extraction_schema(connection: sqlite3.Connection) -> None:
-    """Create the durable queue after the Memory Ledger schema is available."""
+    """Create or migrate the durable queue after the Memory Ledger schema is available."""
 
     memory_ledger.initialize_memory_schema(connection)
     connection.execute(
@@ -223,6 +248,7 @@ def initialize_extraction_schema(connection: sqlite3.Connection) -> None:
             attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
             available_at TEXT NOT NULL,
             lease_expires_at TEXT,
+            claim_token TEXT,
             last_error_code TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -235,6 +261,12 @@ def initialize_extraction_schema(connection: sqlite3.Connection) -> None:
         )
         """
     )
+    columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(memory_extraction_jobs)").fetchall()
+    }
+    if "claim_token" not in columns:
+        connection.execute("ALTER TABLE memory_extraction_jobs ADD COLUMN claim_token TEXT")
     connection.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_memory_extraction_ready
@@ -266,6 +298,10 @@ def guard_extractable_text(text: str) -> str:
     """Reject prohibited content locally before queueing or external inference."""
 
     cleaned = memory_ledger.validate_extractable_text(text)
+    if DIAGNOSIS_PATTERN.search(cleaned):
+        raise memory_ledger.BlockedMemoryContent(
+            "Message contains prohibited diagnosis information"
+        )
     for pattern in TOKEN_PATTERNS:
         if pattern.search(cleaned):
             raise memory_ledger.BlockedMemoryContent(
@@ -316,7 +352,10 @@ def enqueue_message(
         (int(guild_id), context, int(message_id)),
     ).fetchone()
     if existing is not None and str(existing["content_hash"]) == digest:
-        return _row_to_job(existing)
+        status = str(existing["status"])
+        error_code = existing["last_error_code"]
+        if not (status == "rejected" and error_code == "source_edited"):
+            return _row_to_job(existing)
 
     connection.execute(
         """
@@ -324,8 +363,8 @@ def enqueue_message(
             guild_id, subject_user_id, source_context, author_user_id, channel_id,
             message_id, jump_url, content, content_hash, source_created_at,
             source_edited_at, status, attempts, available_at, lease_expires_at,
-            last_error_code, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL, NULL, ?, ?)
+            claim_token, last_error_code, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL, NULL, NULL, ?, ?)
         ON CONFLICT(guild_id, source_context, message_id) DO UPDATE SET
             subject_user_id = excluded.subject_user_id,
             author_user_id = excluded.author_user_id,
@@ -338,6 +377,7 @@ def enqueue_message(
             attempts = 0,
             available_at = excluded.available_at,
             lease_expires_at = NULL,
+            claim_token = NULL,
             last_error_code = NULL,
             updated_at = excluded.updated_at
         """,
@@ -376,7 +416,7 @@ def reset_stale_jobs(connection: sqlite3.Connection) -> int:
     cursor = connection.execute(
         """
         UPDATE memory_extraction_jobs
-        SET status = 'retry', lease_expires_at = NULL, available_at = ?,
+        SET status = 'retry', lease_expires_at = NULL, claim_token = NULL, available_at = ?,
             last_error_code = 'stale_lease', updated_at = ?
         WHERE status = 'processing' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
         """,
@@ -397,10 +437,10 @@ def expire_stale_jobs(connection: sqlite3.Connection) -> int:
         """
         UPDATE memory_extraction_jobs
         SET status = 'rejected', content = NULL, lease_expires_at = NULL,
-            last_error_code = 'queue_expired', updated_at = ?
-        WHERE status IN ('pending', 'retry')
+            claim_token = NULL, last_error_code = 'queue_expired', updated_at = ?
+        WHERE status IN ('pending', 'processing', 'retry')
           AND content IS NOT NULL
-          AND updated_at <= ?
+          AND COALESCE(source_edited_at, created_at) <= ?
         """,
         (timestamp, cutoff),
     )
@@ -426,6 +466,7 @@ def cancel_source_job(
             END,
             content = NULL,
             lease_expires_at = NULL,
+            claim_token = NULL,
             last_error_code = ?,
             updated_at = ?
         WHERE guild_id = ? AND message_id = ?
@@ -473,6 +514,25 @@ def maintain_source_edit(
     return True
 
 
+def get_source_job(
+    connection: sqlite3.Connection,
+    *,
+    guild_id: int,
+    message_id: int,
+) -> ExtractionJob | None:
+    initialize_extraction_schema(connection)
+    row = connection.execute(
+        """
+        SELECT * FROM memory_extraction_jobs
+        WHERE guild_id = ? AND message_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (int(guild_id), int(message_id)),
+    ).fetchone()
+    return _row_to_job(row) if row is not None else None
+
+
 def claim_next_job(connection: sqlite3.Connection) -> ExtractionJob | None:
     """Atomically move one ready job into processing within the current transaction."""
 
@@ -492,11 +552,12 @@ def claim_next_job(connection: sqlite3.Connection) -> ExtractionJob | None:
     if row is None:
         return None
     job_id = int(row["id"])
+    claim_token = secrets.token_hex(16)
     cursor = connection.execute(
         """
         UPDATE memory_extraction_jobs
         SET status = 'processing', attempts = attempts + 1,
-            lease_expires_at = ?, updated_at = ?
+            lease_expires_at = ?, claim_token = ?, updated_at = ?
         WHERE id = ?
           AND status IN ('pending', 'retry')
           AND available_at <= ?
@@ -504,6 +565,7 @@ def claim_next_job(connection: sqlite3.Connection) -> ExtractionJob | None:
         """,
         (
             _iso(now_dt + timedelta(seconds=LEASE_SECONDS)),
+            claim_token,
             now,
             job_id,
             now,
@@ -517,55 +579,88 @@ def claim_next_job(connection: sqlite3.Connection) -> ExtractionJob | None:
     return _row_to_job(claimed) if claimed is not None else None
 
 
-def mark_job_completed(connection: sqlite3.Connection, job_id: int) -> None:
+def _claimed_update(
+    connection: sqlite3.Connection,
+    *,
+    job: ExtractionJob,
+    sql: str,
+    parameters: Sequence[object],
+) -> bool:
+    if not job.claim_token:
+        return False
+    cursor = connection.execute(
+        sql,
+        (*parameters, int(job.id), job.claim_token),
+    )
+    return int(cursor.rowcount) == 1
+
+
+def mark_job_completed(connection: sqlite3.Connection, job: ExtractionJob) -> bool:
     initialize_extraction_schema(connection)
-    connection.execute(
-        """
+    return _claimed_update(
+        connection,
+        job=job,
+        sql="""
         UPDATE memory_extraction_jobs
         SET status = 'completed', content = NULL, lease_expires_at = NULL,
-            last_error_code = NULL, updated_at = ?
-        WHERE id = ?
+            claim_token = NULL, last_error_code = NULL, updated_at = ?
+        WHERE id = ? AND status = 'processing' AND claim_token = ?
         """,
-        (utc_now_iso(), int(job_id)),
+        parameters=(utc_now_iso(),),
     )
 
 
-def mark_job_rejected(connection: sqlite3.Connection, job_id: int, *, reason: str) -> None:
+def mark_job_rejected(
+    connection: sqlite3.Connection,
+    job: ExtractionJob,
+    *,
+    reason: str,
+) -> bool:
     initialize_extraction_schema(connection)
-    connection.execute(
-        """
+    return _claimed_update(
+        connection,
+        job=job,
+        sql="""
         UPDATE memory_extraction_jobs
         SET status = 'rejected', content = NULL, lease_expires_at = NULL,
-            last_error_code = ?, updated_at = ?
-        WHERE id = ?
+            claim_token = NULL, last_error_code = ?, updated_at = ?
+        WHERE id = ? AND status = 'processing' AND claim_token = ?
         """,
-        (reason[:100], utc_now_iso(), int(job_id)),
+        parameters=(reason[:100], utc_now_iso()),
     )
 
 
-def mark_job_retry(connection: sqlite3.Connection, job: ExtractionJob, *, error_code: str) -> None:
+def mark_job_retry(
+    connection: sqlite3.Connection,
+    job: ExtractionJob,
+    *,
+    error_code: str,
+) -> bool:
     initialize_extraction_schema(connection)
     if job.attempts >= MAX_ATTEMPTS:
-        connection.execute(
-            """
+        return _claimed_update(
+            connection,
+            job=job,
+            sql="""
             UPDATE memory_extraction_jobs
             SET status = 'failed', content = NULL, lease_expires_at = NULL,
-                last_error_code = ?, updated_at = ?
-            WHERE id = ?
+                claim_token = NULL, last_error_code = ?, updated_at = ?
+            WHERE id = ? AND status = 'processing' AND claim_token = ?
             """,
-            (error_code[:100], utc_now_iso(), int(job.id)),
+            parameters=(error_code[:100], utc_now_iso()),
         )
-        return
     delay = min(300, 5 * (2 ** max(0, job.attempts - 1)))
     available = _iso(_now() + timedelta(seconds=delay))
-    connection.execute(
-        """
+    return _claimed_update(
+        connection,
+        job=job,
+        sql="""
         UPDATE memory_extraction_jobs
         SET status = 'retry', available_at = ?, lease_expires_at = NULL,
-            last_error_code = ?, updated_at = ?
-        WHERE id = ?
+            claim_token = NULL, last_error_code = ?, updated_at = ?
+        WHERE id = ? AND status = 'processing' AND claim_token = ?
         """,
-        (available, error_code[:100], utc_now_iso(), int(job.id)),
+        parameters=(available, error_code[:100], utc_now_iso()),
     )
 
 
@@ -619,7 +714,8 @@ def parse_proposal(
         summary = guard_extractable_text(str(raw.get("summary", "")))
         if len(summary) > 1000:
             raise InvalidProposal("summary exceeds Memory Ledger limit")
-        topic_key = memory_ledger.normalize_topic_key(str(raw.get("topic_key", "")))
+        raw_topic_key = guard_extractable_text(str(raw.get("topic_key", "")))
+        topic_key = memory_ledger.normalize_topic_key(raw_topic_key)
         importance = _bounded_int(raw.get("importance"), field="importance")
         confidence = _bounded_int(raw.get("confidence"), field="confidence")
 
@@ -637,7 +733,8 @@ def parse_proposal(
                     raise InvalidProposal("member entity was not explicitly mentioned")
                 normalized_key = str(int(entity_key))
             elif entity_type == "term":
-                normalized_key = memory_ledger.normalize_entity_key(entity_key)
+                safe_entity_key = guard_extractable_text(entity_key)
+                normalized_key = memory_ledger.normalize_entity_key(safe_entity_key)
             else:
                 raise InvalidProposal("unsupported entity type")
             entities.append(ExtractionEntity(entity_type, normalized_key))
