@@ -59,9 +59,40 @@ class MemoryExtraction(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.worker.start()
+        self.retention_worker.start()
 
     def cog_unload(self) -> None:
         self.worker.cancel()
+        self.retention_worker.cancel()
+
+    def _authorized_settings(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        guild_id: int,
+        user_id: int,
+    ) -> memory_ledger.LedgerSettings | None:
+        """Return current collection settings only while every mutable gate is authorized."""
+
+        home_guild_id = getattr(self.bot.settings, "home_guild_id", None)
+        if home_guild_id is None or int(home_guild_id) != int(guild_id):
+            return None
+        try:
+            runtime = memory_policy.MemoryRuntimePolicy.from_env()
+        except memory_policy.MemoryPolicyConfigurationError:
+            return None
+        if not runtime.interaction_collection_enabled:
+            return None
+        settings = memory_ledger.get_or_create_settings(connection, int(home_guild_id))
+        if not settings.collection_enabled:
+            return None
+        if not member_profiles.profile_has_current_consent(
+            connection,
+            guild_id=int(home_guild_id),
+            user_id=int(user_id),
+        ):
+            return None
+        return settings
 
     def _job_authorized(
         self,
@@ -70,22 +101,13 @@ class MemoryExtraction(commands.Cog):
     ) -> bool:
         """Re-check mutable collection authority before provider use or mutation."""
 
-        home_guild_id = getattr(self.bot.settings, "home_guild_id", None)
-        if home_guild_id is None or int(home_guild_id) != int(job.guild_id):
-            return False
-        try:
-            runtime = memory_policy.MemoryRuntimePolicy.from_env()
-        except memory_policy.MemoryPolicyConfigurationError:
-            return False
-        if not runtime.interaction_collection_enabled:
-            return False
-        settings = memory_ledger.get_or_create_settings(connection, int(home_guild_id))
-        if not settings.collection_enabled:
-            return False
-        return member_profiles.profile_has_current_consent(
-            connection,
-            guild_id=int(home_guild_id),
-            user_id=job.subject_user_id,
+        return (
+            self._authorized_settings(
+                connection,
+                guild_id=job.guild_id,
+                user_id=job.subject_user_id,
+            )
+            is not None
         )
 
     async def _eligibility(self, message: discord.Message) -> Eligibility:
@@ -135,6 +157,18 @@ class MemoryExtraction(commands.Cog):
             return Eligibility(False, reason="not_interaction")
         return Eligibility(True, home_guild_id, "guild", "interaction")
 
+    def _guild_interaction_still_allowed(
+        self,
+        message: discord.Message,
+        settings: memory_ledger.LedgerSettings,
+    ) -> bool:
+        if self.bot.user is None or message.guild is None:
+            return False
+        designated = settings.wilhelmina_channel_id == message.channel.id
+        mentioned = _mentions_bot(message, self.bot.user.id)
+        replied = _reply_targets_bot(message, self.bot.user.id)
+        return designated or mentioned or replied
+
     async def _enqueue(self, message: discord.Message, *, edited: bool = False) -> None:
         eligibility = await self._eligibility(message)
         if not eligibility.eligible:
@@ -158,6 +192,31 @@ class MemoryExtraction(commands.Cog):
         try:
             initialize_database(_database_path(self.bot))
             with managed_connection(_database_path(self.bot)) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                settings = self._authorized_settings(
+                    connection,
+                    guild_id=eligibility.guild_id,
+                    user_id=message.author.id,
+                )
+                if settings is None:
+                    logger.info(
+                        "memory_extraction_skipped reason=authorization_changed guild_id=%s "
+                        "message_id=%s",
+                        eligibility.guild_id,
+                        message.id,
+                    )
+                    return
+                if eligibility.source_context == "guild" and not self._guild_interaction_still_allowed(
+                    message,
+                    settings,
+                ):
+                    logger.info(
+                        "memory_extraction_skipped reason=interaction_changed guild_id=%s "
+                        "message_id=%s",
+                        eligibility.guild_id,
+                        message.id,
+                    )
+                    return
                 memory_extraction.enqueue_message(
                     connection,
                     guild_id=eligibility.guild_id,
@@ -189,40 +248,117 @@ class MemoryExtraction(commands.Cog):
     async def on_message(self, message: discord.Message) -> None:
         await self._enqueue(message)
 
+    def _raw_edit_interaction_allowed(
+        self,
+        job: memory_extraction.ExtractionJob,
+        *,
+        content: str,
+        settings: memory_ledger.LedgerSettings,
+    ) -> bool:
+        if job.source_context == "dm":
+            return True
+        if self.bot.user is None or job.channel_id is None:
+            return False
+        if settings.wilhelmina_channel_id == job.channel_id:
+            return True
+        mentioned_ids = {int(value) for value in MENTION_PATTERN.findall(content)}
+        return int(self.bot.user.id) in mentioned_ids
+
     @commands.Cog.listener()
-    async def on_message_edit(self, before: discord.Message, after: discord.Message) -> None:
-        if before.content == after.content:
-            return
-        if after.author.bot or after.webhook_id is not None:
-            return
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
         home_guild_id = getattr(self.bot.settings, "home_guild_id", None)
         if home_guild_id is None:
             return
-        if after.guild is not None and int(after.guild.id) != int(home_guild_id):
+        home_guild_id = int(home_guild_id)
+        if payload.guild_id is not None and int(payload.guild_id) != home_guild_id:
             return
 
-        edited_at = (
-            after.edited_at.isoformat(timespec="seconds")
-            if after.edited_at is not None
-            else utc_now_iso()
-        )
         initialize_database(_database_path(self.bot))
+        content = payload.data.get("content")
+        edited_value = payload.data.get("edited_timestamp")
+        edited_at = str(edited_value) if edited_value else utc_now_iso()
+
         with managed_connection(_database_path(self.bot)) as connection:
+            existing = memory_extraction.get_source_job(
+                connection,
+                guild_id=home_guild_id,
+                message_id=payload.message_id,
+            )
+            if existing is None:
+                return
+            if not isinstance(content, str):
+                memory_extraction.cancel_source_job(
+                    connection,
+                    guild_id=home_guild_id,
+                    message_id=payload.message_id,
+                    reason="source_edited_uninspectable",
+                )
+                logger.info(
+                    "memory_extraction_edit_cancelled reason=raw_content_missing guild_id=%s "
+                    "message_id=%s",
+                    home_guild_id,
+                    payload.message_id,
+                )
+                return
             safe_to_requeue = memory_extraction.maintain_source_edit(
                 connection,
-                guild_id=int(home_guild_id),
-                message_id=after.id,
-                edited_excerpt=str(after.content or ""),
+                guild_id=home_guild_id,
+                message_id=payload.message_id,
+                edited_excerpt=content,
                 edited_at=edited_at,
             )
+
         if not safe_to_requeue:
             logger.info(
                 "memory_extraction_edit_rejected reason=sensitive_guard guild_id=%s message_id=%s",
                 home_guild_id,
-                after.id,
+                payload.message_id,
             )
             return
-        await self._enqueue(after, edited=True)
+        if not memory_extraction_provider.provider_ready():
+            return
+
+        with managed_connection(_database_path(self.bot)) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = memory_extraction.get_source_job(
+                connection,
+                guild_id=home_guild_id,
+                message_id=payload.message_id,
+            )
+            if existing is None:
+                return
+            settings = self._authorized_settings(
+                connection,
+                guild_id=home_guild_id,
+                user_id=existing.subject_user_id,
+            )
+            if settings is None:
+                return
+            if not self._raw_edit_interaction_allowed(
+                existing,
+                content=content,
+                settings=settings,
+            ):
+                logger.info(
+                    "memory_extraction_edit_not_requeued reason=interaction_unverifiable "
+                    "guild_id=%s message_id=%s",
+                    home_guild_id,
+                    payload.message_id,
+                )
+                return
+            memory_extraction.enqueue_message(
+                connection,
+                guild_id=existing.guild_id,
+                subject_user_id=existing.subject_user_id,
+                source_context=existing.source_context,
+                author_user_id=existing.author_user_id,
+                channel_id=existing.channel_id,
+                message_id=existing.message_id,
+                jump_url=existing.jump_url,
+                content=content,
+                source_created_at=existing.source_created_at,
+                source_edited_at=edited_at,
+            )
 
     @commands.Cog.listener()
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
@@ -258,6 +394,12 @@ class MemoryExtraction(commands.Cog):
                     message_id=message_id,
                 )
 
+    @tasks.loop(seconds=15.0)
+    async def retention_worker(self) -> None:
+        initialize_database(_database_path(self.bot))
+        with managed_connection(_database_path(self.bot)) as connection:
+            memory_extraction_retention.expire_transient_source_text(connection)
+
     @tasks.loop(seconds=2.0)
     async def worker(self) -> None:
         initialize_database(_database_path(self.bot))
@@ -271,7 +413,7 @@ class MemoryExtraction(commands.Cog):
             if job is not None and not self._job_authorized(connection, job):
                 memory_extraction.mark_job_rejected(
                     connection,
-                    job.id,
+                    job,
                     reason="authorization_changed",
                 )
                 job = None
@@ -295,17 +437,19 @@ class MemoryExtraction(commands.Cog):
 
         initialize_database(_database_path(self.bot))
         with managed_connection(_database_path(self.bot)) as connection:
+            connection.execute("BEGIN IMMEDIATE")
             current = memory_extraction.get_job(connection, job.id)
             if (
                 current is None
                 or current.content_hash != job.content_hash
                 or current.status != "processing"
+                or current.claim_token != job.claim_token
             ):
                 return
             if not self._job_authorized(connection, current):
                 memory_extraction.mark_job_rejected(
                     connection,
-                    current.id,
+                    current,
                     reason="authorization_changed",
                 )
                 return
@@ -330,7 +474,7 @@ class MemoryExtraction(commands.Cog):
             except (memory_extraction.InvalidProposal, memory_ledger.BlockedMemoryContent):
                 memory_extraction.mark_job_rejected(
                     connection,
-                    current.id,
+                    current,
                     reason="invalid_proposal",
                 )
                 return
@@ -346,10 +490,14 @@ class MemoryExtraction(commands.Cog):
                     error_code="apply_failed",
                 )
                 return
-            memory_extraction.mark_job_completed(connection, current.id)
+            memory_extraction.mark_job_completed(connection, current)
 
     @worker.before_loop
     async def before_worker(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @retention_worker.before_loop
+    async def before_retention_worker(self) -> None:
         await self.bot.wait_until_ready()
 
 
