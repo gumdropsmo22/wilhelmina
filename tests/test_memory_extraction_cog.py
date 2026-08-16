@@ -5,8 +5,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from cogs.memory_extraction import MemoryExtraction, _mentioned_member_ids
-from services import coven_registry, memory_ledger, member_profiles
+from cogs.memory_extraction import Eligibility, MemoryExtraction, _mentioned_member_ids
+from services import (
+    coven_registry,
+    memory_extraction,
+    memory_extraction_provider,
+    memory_ledger,
+    member_profiles,
+)
 from services.database import initialize_database, managed_connection
 
 
@@ -161,6 +167,72 @@ async def test_bot_and_wrong_guild_are_rejected(database_path, monkeypatch):
     )
     assert bot_message.reason == "non_human"
     assert wrong_guild.reason == "wrong_guild"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_rechecks_pause_in_same_write_transaction(database_path, monkeypatch):
+    monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
+    _grant_consent(database_path)
+    cog = _cog(database_path)
+    message = _message(mentions=(SimpleNamespace(id=999),))
+
+    async def stale_eligibility(_message_value):
+        with managed_connection(database_path) as connection:
+            memory_ledger.set_collection_enabled(
+                connection,
+                guild_id=100,
+                enabled=False,
+                actor_user_id=2,
+            )
+        return Eligibility(True, 100, "guild", "interaction")
+
+    monkeypatch.setattr(cog, "_eligibility", stale_eligibility)
+    monkeypatch.setattr(memory_extraction_provider, "provider_ready", lambda: True)
+    await cog._enqueue(message)
+
+    with managed_connection(database_path) as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) AS count FROM memory_extraction_jobs"
+        ).fetchone()["count"]
+    assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_uncached_sensitive_raw_edit_cancels_old_queue(database_path, monkeypatch):
+    monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
+    _grant_consent(database_path)
+    with managed_connection(database_path) as connection:
+        memory_extraction.initialize_extraction_schema(connection)
+        queued = memory_extraction.enqueue_message(
+            connection,
+            guild_id=100,
+            subject_user_id=2,
+            source_context="guild",
+            author_user_id=2,
+            channel_id=10,
+            message_id=500,
+            jump_url="https://discord.com/channels/100/10/500",
+            content="I prefer tea",
+            source_created_at="2026-08-13T10:00:00+00:00",
+        )
+
+    payload = SimpleNamespace(
+        guild_id=100,
+        message_id=500,
+        data={
+            "content": "Actually I have HIV",
+            "edited_timestamp": "2026-08-13T10:05:00+00:00",
+        },
+    )
+    await _cog(database_path).on_raw_message_edit(payload)
+
+    with managed_connection(database_path) as connection:
+        current = memory_extraction.get_job(connection, queued.id)
+    assert current is not None
+    assert current.status == "rejected"
+    assert current.content is None
+    assert current.claim_token is None
+    assert current.last_error_code == "source_edited"
 
 
 def test_mentioned_member_ids_are_deduped_and_exclude_wilhelmina():
