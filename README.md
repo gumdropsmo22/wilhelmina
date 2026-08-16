@@ -312,9 +312,12 @@ Automatic Memory Ledger extraction is different: when enabled, it uses the priva
 
 ```env
 OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-5.6-sol
+OPENAI_CHAT_MODEL=gpt-5.6-sol
+OPENAI_MEMORY_MODEL=gpt-5.6-terra
 AI_TIMEOUT_SECONDS=8
 AI_MAX_RETRIES=1
+OPENAI_RETENTION_MODE=standard
 ```
 
 ## Running locally
