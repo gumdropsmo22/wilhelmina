@@ -408,12 +408,12 @@ def test_edit_replaces_same_topic_but_preserves_original_and_latest_receipt(data
             guild_id=100,
             message_id=500,
             edited_excerpt="Actually I hate tea",
-            edited_at="2026-08-13T10:05:00+00:00",
+            edited_at="2999-08-13T10:05:00+00:00",
         )
         _enqueue(
             connection,
             content="Actually I hate tea",
-            edited_at="2026-08-13T10:05:00+00:00",
+            edited_at="2999-08-13T10:05:00+00:00",
         )
         edited_job = memory_extraction.claim_next_job(connection)
         assert edited_job is not None
@@ -436,7 +436,7 @@ def test_edit_replaces_same_topic_but_preserves_original_and_latest_receipt(data
     assert new.summary == "Dislikes tea"
     assert receipts[0].original_excerpt == "I prefer tea"
     assert receipts[0].edited_excerpt == "Actually I hate tea"
-    assert receipts[0].source_edited_at == "2026-08-13T10:05:00+00:00"
+    assert receipts[0].source_edited_at == "2999-08-13T10:05:00+00:00"
 
 
 def test_source_delete_marks_receipt_and_clears_processing_job(database_path):
