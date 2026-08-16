@@ -11,7 +11,7 @@ from discord.ext import commands, tasks
 
 from services import ai, memory_extraction, memory_extraction_provider, memory_ledger, memory_policy
 from services import memory_extraction_retention, memory_reconciliation, member_profiles
-from services.database import initialize_database, managed_connection, utc_now_iso
+from services.database import initialize_database, managed_connection
 
 logger = logging.getLogger("wilhelmina.memory.events")
 MENTION_PATTERN = re.compile(r"<@!?(\d+)>")
@@ -276,47 +276,6 @@ class MemoryExtraction(commands.Cog):
         initialize_database(_database_path(self.bot))
         content = payload.data.get("content")
         edited_value = payload.data.get("edited_timestamp")
-        edited_at = str(edited_value) if edited_value else utc_now_iso()
-
-        with managed_connection(_database_path(self.bot)) as connection:
-            existing = memory_extraction.get_source_job(
-                connection,
-                guild_id=home_guild_id,
-                message_id=payload.message_id,
-            )
-            if existing is None:
-                return
-            if not isinstance(content, str):
-                memory_extraction.cancel_source_job(
-                    connection,
-                    guild_id=home_guild_id,
-                    message_id=payload.message_id,
-                    reason="source_edited_uninspectable",
-                )
-                logger.info(
-                    "memory_extraction_edit_cancelled reason=raw_content_missing guild_id=%s "
-                    "message_id=%s",
-                    home_guild_id,
-                    payload.message_id,
-                )
-                return
-            safe_to_requeue = memory_extraction.maintain_source_edit(
-                connection,
-                guild_id=home_guild_id,
-                message_id=payload.message_id,
-                edited_excerpt=content,
-                edited_at=edited_at,
-            )
-
-        if not safe_to_requeue:
-            logger.info(
-                "memory_extraction_edit_rejected reason=sensitive_guard guild_id=%s message_id=%s",
-                home_guild_id,
-                payload.message_id,
-            )
-            return
-        if not memory_extraction_provider.provider_ready():
-            return
 
         with managed_connection(_database_path(self.bot)) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -327,16 +286,102 @@ class MemoryExtraction(commands.Cog):
             )
             if existing is None:
                 return
+
+            if edited_value is None:
+                memory_extraction.cancel_source_job(
+                    connection,
+                    guild_id=home_guild_id,
+                    message_id=payload.message_id,
+                    reason="source_edited_unversioned",
+                )
+                logger.info(
+                    "memory_extraction_edit_cancelled reason=raw_timestamp_missing guild_id=%s "
+                    "message_id=%s",
+                    home_guild_id,
+                    payload.message_id,
+                )
+                return
+            try:
+                edited_at = memory_extraction.normalize_source_timestamp(str(edited_value))
+            except memory_extraction.ExtractionError:
+                memory_extraction.cancel_source_job(
+                    connection,
+                    guild_id=home_guild_id,
+                    message_id=payload.message_id,
+                    reason="source_edited_unversioned",
+                )
+                return
+
+            if not memory_extraction.source_edit_is_newer(existing, edited_at):
+                logger.info(
+                    "memory_extraction_edit_ignored reason=stale_edit guild_id=%s message_id=%s",
+                    home_guild_id,
+                    payload.message_id,
+                )
+                return
+
+            memory_extraction.cancel_source_job(
+                connection,
+                guild_id=home_guild_id,
+                message_id=payload.message_id,
+                reason="source_edited",
+                source_edited_at=edited_at,
+            )
+
+            if not isinstance(content, str):
+                logger.info(
+                    "memory_extraction_edit_cancelled reason=raw_content_missing guild_id=%s "
+                    "message_id=%s",
+                    home_guild_id,
+                    payload.message_id,
+                )
+                return
+
             settings = self._authorized_settings(
                 connection,
                 guild_id=home_guild_id,
                 user_id=existing.subject_user_id,
             )
             if settings is None:
+                logger.info(
+                    "memory_extraction_edit_cancelled reason=authorization_changed guild_id=%s "
+                    "message_id=%s",
+                    home_guild_id,
+                    payload.message_id,
+                )
+                return
+
+            try:
+                cleaned = memory_extraction.guard_extractable_text(content)
+            except memory_ledger.BlockedMemoryContent:
+                memory_ledger.mark_message_edited(
+                    connection,
+                    guild_id=home_guild_id,
+                    message_id=payload.message_id,
+                    edited_excerpt=memory_extraction.SENSITIVE_EDIT_MARKER,
+                    edited_at=edited_at,
+                )
+                logger.info(
+                    "memory_extraction_edit_rejected reason=sensitive_guard guild_id=%s "
+                    "message_id=%s",
+                    home_guild_id,
+                    payload.message_id,
+                )
+                return
+
+            memory_ledger.mark_message_edited(
+                connection,
+                guild_id=home_guild_id,
+                message_id=payload.message_id,
+                edited_excerpt=cleaned,
+                edited_at=edited_at,
+            )
+
+            if not memory_extraction_provider.provider_ready():
                 return
             if not self._raw_edit_interaction_allowed(
                 existing,
-                content=content,
+                content=cleaned,
                 settings=settings,
             ):
                 logger.info(
@@ -346,6 +391,7 @@ class MemoryExtraction(commands.Cog):
                     payload.message_id,
                 )
                 return
+
             memory_extraction.enqueue_message(
                 connection,
                 guild_id=existing.guild_id,
@@ -355,7 +401,7 @@ class MemoryExtraction(commands.Cog):
                 channel_id=existing.channel_id,
                 message_id=existing.message_id,
                 jump_url=existing.jump_url,
-                content=content,
+                content=cleaned,
                 source_created_at=existing.source_created_at,
                 source_edited_at=edited_at,
             )
