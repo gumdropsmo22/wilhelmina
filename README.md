@@ -15,16 +15,17 @@ Features are independent modules. There is no umbrella `oracles` cog in the acti
 Current cogs:
 
 ```txt
-cogs.core          /about, /uptime
-cogs.admin         /admin diagnostics, /admin features, /admin sync, /admin config ...
-cogs.help          /help
-cogs.rules         /rules, /rules-admin ...
-cogs.memory_admin  /memory-admin ...
-cogs.invite        /invite
-cogs.roll          /roll
-cogs.eight_ball    /8ball
-cogs.fortune       /fortune
-cogs.broadcasts    /broadcast-admin ...
+cogs.core               /about, /uptime
+cogs.admin              /admin diagnostics, /admin features, /admin sync, /admin config ...
+cogs.help               /help
+cogs.rules              /rules, /rules-admin ...
+cogs.memory_admin       /memory-admin ...
+cogs.memory_extraction  interaction-scoped automatic Memory Ledger extraction
+cogs.invite             /invite
+cogs.roll               /roll
+cogs.eight_ball         /8ball
+cogs.fortune            /fortune
+cogs.broadcasts         /broadcast-admin ...
 ```
 
 Each optional feature has its own flag:
@@ -33,6 +34,7 @@ Each optional feature has its own flag:
 ENABLE_HELP=true
 ENABLE_RULES=true
 ENABLE_MEMORY_ADMIN=true
+ENABLE_MEMORY_EXTRACTION=false
 ENABLE_INVITE=false
 ENABLE_ROLL=false
 ENABLE_EIGHT_BALL=false
@@ -138,6 +140,7 @@ memory_receipts
 memory_contradictions
 memory_entities
 memory_search
+memory_extraction_jobs
 schema_migrations
 ```
 
@@ -217,6 +220,30 @@ Single-memory deletion requires the exact confirmation text `DELETE`. Member-wid
 
 See `docs/memory_controls.md` and `docs/memory_ledger.md` for the privacy and data-control contract.
 
+## Automatic Memory Ledger extraction
+
+`cogs.memory_extraction` is the Phase 4 interaction-scoped ingestion worker. It is **disabled by default** and does not enable broad whole-server listening.
+
+When explicitly enabled, eligible human text is limited to direct DMs with Wilhelmina, the designated Wilhelmina chat, direct mentions, and resolvable replies to Wilhelmina. Unaddressed ambient guild chatter remains excluded even if future ambient environment switches exist.
+
+Minimum activation shape:
+
+```env
+ENABLE_MEMORY_EXTRACTION=true
+MEMORY_COLLECTION_MODE=interaction
+OPENAI_RETENTION_MODE=mam
+```
+
+`zdr` may be used instead of `mam` when that approved project configuration is available. The environment value is only a deployment assertion; the corresponding retention control must actually be configured for the OpenAI project. Private extraction requests use `store=false`.
+
+Enabling extraction requests Discord's Message Content intent, which must also be enabled in the Discord Developer Portal. The persistent Memory Ledger collection gate must be resumed, and each author must have the current versioned adult-memory consent.
+
+Phase 4 uses schema v11 queue ownership with per-claim tokens, absolute raw-text TTL cleanup, atomic authorization before queue persistence, uncached/raw edit handling, and deterministic sensitive-data rejection both before OpenAI and after structured model output. SQLite/Python remain authoritative; the model cannot authorize access or mutate memory directly.
+
+For upgrades from the earlier v10 extraction draft, stop/drain old workers before enabling v11. v11 invalidates leftover tokenless processing rows and installs database enforcement that prevents old-style tokenless claims from entering `processing`.
+
+See `docs/memory_extraction.md` for the full eligibility, privacy, queue, rollout, and rollback contract.
+
 ## Scheduled Daily Broadcasts
 
 `cogs.broadcasts` adds `/broadcast-admin` controls for Wilhelmina's automatic daily show system.
@@ -281,6 +308,8 @@ This keeps Wilhelmina recognizable while allowing each feature to apply the righ
 
 `/8ball`, `/fortune`, `/help`, `/rules`, and `/broadcast-admin preview/send-test` can use AI first when `OPENAI_API_KEY` is configured, then fall back to static or stored responses if AI is unavailable.
 
+Automatic Memory Ledger extraction is different: when enabled, it uses the private structured-memory provider path and fails closed if the required private retention configuration is unavailable. It has no static fallback that persists guessed memories.
+
 ```env
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
@@ -318,6 +347,7 @@ Optional cogs:
 ENABLE_HELP=true
 ENABLE_RULES=true
 ENABLE_MEMORY_ADMIN=true
+ENABLE_MEMORY_EXTRACTION=false
 ENABLE_INVITE=false
 ENABLE_ROLL=false
 ENABLE_EIGHT_BALL=false
