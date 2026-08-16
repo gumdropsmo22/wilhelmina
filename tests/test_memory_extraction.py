@@ -63,7 +63,7 @@ def _proposal(
     )
 
 
-def test_schema_v10_and_queue_initialize_idempotently(database_path):
+def test_schema_v11_and_queue_initialize_idempotently(database_path):
     with managed_connection(database_path) as connection:
         memory_extraction.initialize_extraction_schema(connection)
         memory_extraction.initialize_extraction_schema(connection)
@@ -73,12 +73,71 @@ def test_schema_v10_and_queue_initialize_idempotently(database_path):
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
+        columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(memory_extraction_jobs)"
+            ).fetchall()
+        }
         versions = {
             int(row["version"])
             for row in connection.execute("SELECT version FROM schema_migrations").fetchall()
         }
     assert "memory_extraction_jobs" in tables
+    assert "claim_token" in columns
     assert memory_extraction.MEMORY_EXTRACTION_SCHEMA_VERSION in versions
+
+
+def test_schema_v10_migrates_claim_token_in_place(tmp_path):
+    path = tmp_path / "wilhelmina-v10.sqlite3"
+    initialize_database(path)
+    with managed_connection(path) as connection:
+        coven_registry.bootstrap_registry(
+            connection,
+            guild_id=100,
+            wilhelmina_user_id=999,
+            founder_user_id=2,
+            founder_name="Founder",
+            actor_user_id=2,
+        )
+        memory_ledger.initialize_memory_schema(connection)
+        connection.execute(
+            """
+            CREATE TABLE memory_extraction_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                subject_user_id INTEGER NOT NULL,
+                source_context TEXT NOT NULL,
+                author_user_id INTEGER NOT NULL,
+                channel_id INTEGER,
+                message_id INTEGER NOT NULL,
+                jump_url TEXT,
+                content TEXT,
+                content_hash TEXT NOT NULL,
+                source_created_at TEXT NOT NULL,
+                source_edited_at TEXT,
+                status TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                available_at TEXT NOT NULL,
+                lease_expires_at TEXT,
+                last_error_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (guild_id, source_context, message_id)
+            )
+            """
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (10, 'now')"
+        )
+        memory_extraction.initialize_extraction_schema(connection)
+        columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(memory_extraction_jobs)"
+            ).fetchall()
+        }
+    assert "claim_token" in columns
 
 
 def test_structured_schema_excludes_admin_notes_and_bounds_arrays():
@@ -98,6 +157,10 @@ def test_sensitive_guard_rejects_before_queue(database_path):
         "My SSN is 123-45-6789",
         "Ship it to 123 Main Street",
         "Card 4111 1111 1111 1111",
+        "I have HIV",
+        "I am bipolar",
+        "My AWS access key is AKIAIOSFODNN7EXAMPLE",
+        "client secret: verysecretcredential123456",
     )
     with managed_connection(database_path) as connection:
         for content in blocked:
@@ -116,7 +179,8 @@ def test_enqueue_is_idempotent_and_edit_requeues_latest_content(database_path):
         assert duplicate.id == first.id
         claimed = memory_extraction.claim_next_job(connection)
         assert claimed is not None and claimed.attempts == 1
-        memory_extraction.mark_job_completed(connection, claimed.id)
+        assert claimed.claim_token
+        assert memory_extraction.mark_job_completed(connection, claimed) is True
         edited = _enqueue(
             connection,
             content="Actually I hate tea",
@@ -155,7 +219,11 @@ def test_failed_provider_retries_then_clears_content_at_terminal_failure(databas
             job = memory_extraction.claim_next_job(connection)
             assert job is not None
             assert job.attempts == expected_attempt
-            memory_extraction.mark_job_retry(connection, job, error_code="provider")
+            assert memory_extraction.mark_job_retry(
+                connection,
+                job,
+                error_code="provider",
+            ) is True
             if expected_attempt < memory_extraction.MAX_ATTEMPTS:
                 connection.execute(
                     "UPDATE memory_extraction_jobs SET available_at = '2000-01-01T00:00:00+00:00'"
@@ -164,6 +232,40 @@ def test_failed_provider_retries_then_clears_content_at_terminal_failure(databas
     assert terminal is not None
     assert terminal.status == "failed"
     assert terminal.content is None
+
+
+def test_expired_claim_cannot_mutate_reclaimed_job(database_path):
+    with managed_connection(database_path) as connection:
+        _enqueue(connection, content="I prefer tea")
+        claim_a = memory_extraction.claim_next_job(connection)
+        assert claim_a is not None and claim_a.claim_token
+        connection.execute(
+            """
+            UPDATE memory_extraction_jobs
+            SET lease_expires_at = '2000-01-01T00:00:00+00:00'
+            WHERE id = ?
+            """,
+            (claim_a.id,),
+        )
+        assert memory_extraction.reset_stale_jobs(connection) == 1
+        connection.execute(
+            """
+            UPDATE memory_extraction_jobs
+            SET available_at = '2000-01-01T00:00:00+00:00'
+            WHERE id = ?
+            """,
+            (claim_a.id,),
+        )
+        claim_b = memory_extraction.claim_next_job(connection)
+        assert claim_b is not None and claim_b.claim_token
+        assert claim_b.claim_token != claim_a.claim_token
+
+        assert memory_extraction.mark_job_completed(connection, claim_a) is False
+        current = memory_extraction.get_job(connection, claim_a.id)
+        assert current is not None
+        assert current.status == "processing"
+        assert current.claim_token == claim_b.claim_token
+        assert memory_extraction.mark_job_completed(connection, claim_b) is True
 
 
 def test_proposal_rejects_admin_notes_and_unmentioned_member_entities():
@@ -188,6 +290,39 @@ def test_proposal_rejects_admin_notes_and_unmentioned_member_entities():
                 ]
             },
             mentioned_member_ids=(88,),
+        )
+
+
+def test_proposal_sensitive_topic_and_term_are_rejected():
+    base = {
+        "category": "Preference",
+        "epistemic_label": "Fact",
+        "summary": "Prefers tea",
+        "topic_key": "drink.tea",
+        "importance": 50,
+        "confidence": 90,
+        "entities": [],
+    }
+    with pytest.raises(memory_ledger.BlockedMemoryContent):
+        memory_extraction.parse_proposal(
+            {
+                "candidates": [
+                    {**base, "topic_key": "sk-abcdefghijklmnopqrstuvwxyz1234567890"}
+                ]
+            }
+        )
+    with pytest.raises(memory_ledger.BlockedMemoryContent):
+        memory_extraction.parse_proposal(
+            {
+                "candidates": [
+                    {
+                        **base,
+                        "entities": [
+                            {"type": "term", "key": "AKIAIOSFODNN7EXAMPLE"}
+                        ],
+                    }
+                ]
+            }
         )
 
 
@@ -239,7 +374,7 @@ def test_apply_creates_memory_receipt_and_entities(database_path):
             proposal=_proposal(),
             actor_user_id=999,
         )
-        memory_extraction.mark_job_completed(connection, job.id)
+        assert memory_extraction.mark_job_completed(connection, job) is True
         memory = memory_ledger.get_memory(connection, result.touched_memory_ids[0])
         receipts = memory_ledger.list_receipts(connection, memory.id)
         entities = memory_ledger.list_memory_entities(connection, memory_id=memory.id)
@@ -265,7 +400,7 @@ def test_edit_replaces_same_topic_but_preserves_original_and_latest_receipt(data
             proposal=_proposal(),
             actor_user_id=999,
         )
-        memory_extraction.mark_job_completed(connection, first_job.id)
+        assert memory_extraction.mark_job_completed(connection, first_job) is True
         old_id = first_result.touched_memory_ids[0]
 
         memory_extraction.mark_source_edited(
@@ -328,4 +463,5 @@ def test_source_delete_marks_receipt_and_clears_processing_job(database_path):
     assert queued is not None
     assert queued.status == "rejected"
     assert queued.content is None
+    assert queued.claim_token is None
     assert queued.last_error_code == "source_deleted"
