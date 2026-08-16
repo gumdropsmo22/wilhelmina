@@ -62,6 +62,32 @@ def test_retry_bookkeeping_does_not_extend_absolute_raw_text_ttl(database_path):
     assert current.last_error_code == "queue_expired"
 
 
+def test_processing_text_expires_and_revokes_in_flight_claim(database_path):
+    with managed_connection(database_path) as connection:
+        queued = _enqueue(connection)
+        claimed = memory_extraction.claim_next_job(connection)
+        assert claimed is not None and claimed.claim_token
+        connection.execute(
+            """
+            UPDATE memory_extraction_jobs
+            SET created_at = '2000-01-01T00:00:00+00:00'
+            WHERE id = ?
+            """,
+            (queued.id,),
+        )
+        expired = memory_extraction_retention.expire_transient_source_text(connection)
+        current = memory_extraction.get_job(connection, queued.id)
+        stale_completed = memory_extraction.mark_job_completed(connection, claimed)
+
+    assert expired == 1
+    assert current is not None
+    assert current.status == "rejected"
+    assert current.content is None
+    assert current.claim_token is None
+    assert current.last_error_code == "queue_expired"
+    assert stale_completed is False
+
+
 def test_real_source_edit_resets_absolute_raw_text_ttl(database_path):
     with managed_connection(database_path) as connection:
         queued = _enqueue(connection)
