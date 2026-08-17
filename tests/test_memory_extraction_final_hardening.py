@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+import pytest
+
+from services import memory_extraction, memory_ledger
+from services.database import initialize_database, managed_connection
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I have leukemia",
+        "I have hypertension",
+        "driver licence D1234567",
+        "auth token: abcdefgh123456",
+    ],
+)
+def test_final_sensitive_variants_are_rejected_before_extraction(text):
+    with pytest.raises(memory_ledger.BlockedMemoryContent):
+        memory_extraction.guard_extractable_text(text)
+
+
+def test_source_edit_ordering_preserves_subsecond_precision():
+    normalized = memory_extraction.normalize_source_timestamp(
+        "2026-08-17T02:00:00.123456+00:00"
+    )
+    assert normalized == "2026-08-17T02:00:00.123456+00:00"
+
+    job = memory_extraction.ExtractionJob(
+        id=1,
+        guild_id=100,
+        subject_user_id=2,
+        source_context="guild",
+        author_user_id=2,
+        channel_id=10,
+        message_id=500,
+        jump_url="https://discord.com/channels/100/10/500",
+        content="latest",
+        content_hash="hash",
+        source_created_at="2026-08-17T01:59:00.000000+00:00",
+        source_edited_at="2026-08-17T02:00:00.100000+00:00",
+        status="pending",
+        attempts=0,
+        available_at="2026-08-17T02:00:00+00:00",
+        lease_expires_at=None,
+        claim_token=None,
+        last_error_code=None,
+        created_at="2026-08-17T02:00:00+00:00",
+        updated_at="2026-08-17T02:00:00+00:00",
+    )
+
+    assert memory_extraction.source_edit_is_newer(
+        job, "2026-08-17T02:00:00.200000+00:00"
+    )
+    assert not memory_extraction.source_edit_is_newer(
+        job, "2026-08-17T02:00:00.050000+00:00"
+    )
+
+
+def test_final_ttl_gate_revokes_processing_claim_before_apply(tmp_path, monkeypatch):
+    path = tmp_path / "wilhelmina.sqlite3"
+    initialize_database(path)
+
+    before_expiry = datetime(2026, 8, 17, 0, 59, 59, tzinfo=UTC)
+    after_expiry = datetime(2026, 8, 17, 1, 0, 0, 500001, tzinfo=UTC)
+    monkeypatch.setattr(memory_extraction, "_now", lambda: before_expiry)
+
+    with managed_connection(path) as connection:
+        memory_extraction.initialize_extraction_schema(connection)
+        queued = memory_extraction.enqueue_message(
+            connection,
+            guild_id=100,
+            subject_user_id=2,
+            source_context="guild",
+            author_user_id=2,
+            channel_id=10,
+            message_id=500,
+            jump_url="https://discord.com/channels/100/10/500",
+            content="I prefer tea",
+            source_created_at="2026-08-17T00:00:00.500000+00:00",
+            source_edited_at="2026-08-17T00:00:00.500000+00:00",
+        )
+        claimed = memory_extraction.claim_next_job(connection)
+        assert claimed is not None
+        assert claimed.status == "processing"
+        assert claimed.claim_token
+
+        monkeypatch.setattr(memory_extraction, "_now", lambda: after_expiry)
+        expired = memory_extraction.expire_stale_jobs(connection)
+        current = memory_extraction.get_job(connection, queued.id)
+
+    assert expired == 1
+    assert current is not None
+    assert current.status == "rejected"
+    assert current.content is None
+    assert current.claim_token is None
+    assert current.last_error_code == "queue_expired"
