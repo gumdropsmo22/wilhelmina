@@ -61,7 +61,7 @@ DIAGNOSIS_PATTERNS = (
     ),
     re.compile(
         r"\b(?:i\s+(?:am|was|have\s+been)\s+diagnosed\s+with|"
-        r"i\s+(?:suffer|suffered|am\s+suffering)\s+from|"
+        r"i\s+(?:suffer|suffered|am\s+suffering)\s+(?:from|with)|"
         r"my\s+diagnosis\s+(?:is|was))\b",
         re.IGNORECASE,
     ),
