@@ -13,6 +13,10 @@ from services.database import initialize_database, managed_connection
     [
         "I have leukemia",
         "I have hypertension",
+        "I have hepatitis C",
+        "I have rheumatoid arthritis",
+        "I have dementia",
+        "I suffer from migraines",
         "driver licence D1234567",
         "auth token: abcdefgh123456",
     ],
@@ -20,6 +24,69 @@ from services.database import initialize_database, managed_connection
 def test_final_sensitive_variants_are_rejected_before_extraction(text):
     with pytest.raises(memory_ledger.BlockedMemoryContent):
         memory_extraction.guard_extractable_text(text)
+
+
+def test_generalized_diagnosis_is_rejected_before_queue_persistence(tmp_path):
+    path = tmp_path / "wilhelmina.sqlite3"
+    initialize_database(path)
+
+    with managed_connection(path) as connection:
+        memory_extraction.initialize_extraction_schema(connection)
+        with pytest.raises(memory_ledger.BlockedMemoryContent):
+            memory_extraction.enqueue_message(
+                connection,
+                guild_id=100,
+                subject_user_id=2,
+                source_context="guild",
+                author_user_id=2,
+                channel_id=10,
+                message_id=501,
+                jump_url="https://discord.com/channels/100/10/501",
+                content="I have rheumatoid arthritis",
+                source_created_at="2026-08-17T02:00:00+00:00",
+            )
+        count = connection.execute(
+            "SELECT COUNT(*) AS count FROM memory_extraction_jobs"
+        ).fetchone()["count"]
+
+    assert count == 0
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        {
+            "category": "Preference",
+            "epistemic_label": "Fact",
+            "summary": "I have hepatitis C",
+            "topic_key": "health.private",
+            "importance": 60,
+            "confidence": 95,
+            "entities": [],
+        },
+        {
+            "category": "Preference",
+            "epistemic_label": "Fact",
+            "summary": "Private health detail",
+            "topic_key": "I have dementia",
+            "importance": 60,
+            "confidence": 95,
+            "entities": [],
+        },
+        {
+            "category": "Preference",
+            "epistemic_label": "Fact",
+            "summary": "Private health detail",
+            "topic_key": "health.private",
+            "importance": 60,
+            "confidence": 95,
+            "entities": [{"type": "term", "key": "I suffer from migraines"}],
+        },
+    ],
+)
+def test_generalized_diagnosis_is_rejected_from_model_output(candidate):
+    with pytest.raises(memory_ledger.BlockedMemoryContent):
+        memory_extraction.parse_proposal({"candidates": [candidate]})
 
 
 def test_source_edit_ordering_preserves_subsecond_precision():
