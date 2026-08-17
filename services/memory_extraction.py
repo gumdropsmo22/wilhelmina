@@ -34,6 +34,7 @@ TOKEN_PATTERNS = (
     re.compile(
         r"\b(?:(?:aws\s+)?(?:secret\s+access\s+key|access\s+key(?:\s+id)?|"
         r"session\s+token)|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|"
+        r"auth(?:entication|orization)?[ _-]?token|bearer[ _-]?token|password|passphrase|"
         r"secret[ _-]?key|client[ _-]?secret|private[ _-]?token)\b"
         r"\s*(?:is|=|:)?\s*[A-Za-z0-9_./+=-]{8,}\b",
         re.IGNORECASE,
@@ -41,7 +42,7 @@ TOKEN_PATTERNS = (
     re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
     re.compile(
         r"\b(?:passport|national[ _-]?id|identity[ _-]?(?:document|number)|"
-        r"driver(?:'?s)?[ _-]?license|tax[ _-]?id|resident[ _-]?id)\b"
+        r"driv(?:er(?:'?s)?|ing)[ _-]?licen[cs]e|tax[ _-]?id|resident[ _-]?id)\b"
         r"\s*(?:number|no\.?|#)?\s*(?:is|=|:)?\s*[A-Z0-9-]{5,}\b",
         re.IGNORECASE,
     ),
@@ -62,7 +63,8 @@ DIAGNOSIS_PATTERNS = (
         r"\b(?:HIV|AIDS|lupus|Parkinson(?:'s)?(?:\s+disease)?|multiple\s+sclerosis|"
         r"Crohn(?:'s)?(?:\s+disease)?|schizophrenia|bipolar(?:\s+disorder)?|PTSD|OCD|"
         r"ADHD|autism|major\s+depressive\s+disorder|depression|anxiety\s+disorder|"
-        r"cancer|diabetes|epilepsy|asthma|Tourette(?:'s)?(?:\s+syndrome)?)\b",
+        r"cancer|leukemia|lymphoma|melanoma|diabetes|hypertension|heart\s+disease|"
+        r"kidney\s+disease|epilepsy|asthma|Tourette(?:'s)?(?:\s+syndrome)?)\b",
         re.IGNORECASE,
     ),
     re.compile(
@@ -220,7 +222,7 @@ def normalize_source_timestamp(value: str) -> str:
         raise ExtractionError("source edit timestamp is invalid") from exc
     if parsed.tzinfo is None:
         raise ExtractionError("source edit timestamp must be timezone-aware")
-    return parsed.astimezone(UTC).isoformat(timespec="seconds")
+    return parsed.astimezone(UTC).isoformat(timespec="microseconds")
 
 
 def source_edit_is_newer(job: ExtractionJob, edited_at: str) -> bool:
