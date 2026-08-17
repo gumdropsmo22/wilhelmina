@@ -60,6 +60,25 @@ DIAGNOSIS_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
+        r"\b(?:i\s+(?:am|was|have\s+been)\s+diagnosed\s+with|"
+        r"i\s+(?:suffer|suffered|am\s+suffering)\s+from|"
+        r"my\s+diagnosis\s+(?:is|was))\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bi\s+(?:have|have\s+got|live\s+with)\s+(?:(?:a|an|the)\s+)?"
+        r"(?:[A-Za-z][A-Za-z'-]*\s+){0,3}"
+        r"(?:hepatitis(?:\s+[A-E])?|arthritis|dementia|migraines?|fibromyalgia|"
+        r"psoriasis|eczema|cirrhosis|anemia|anaemia|glaucoma|alzheimer(?:'s)?|"
+        r"parkinson(?:'s)?|sclerosis|diabetes|hypertension|epilepsy|asthma|cancer|"
+        r"leukemia|lymphoma|melanoma|schizophrenia|bipolar|depression|anxiety|autism|"
+        r"HIV|AIDS|PTSD|OCD|ADHD|ALS|COPD|IBD|IBS|PCOS|long\s+COVID|COVID(?:-19)?|"
+        r"influenza|tuberculosis|pneumonia|"
+        r"[A-Za-z][A-Za-z'-]*(?:itis|emia|aemia|osis|opathy|plegia)|"
+        r"disease|disorder|syndrome)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
         r"\b(?:HIV|AIDS|lupus|Parkinson(?:'s)?(?:\s+disease)?|multiple\s+sclerosis|"
         r"Crohn(?:'s)?(?:\s+disease)?|schizophrenia|bipolar(?:\s+disorder)?|PTSD|OCD|"
         r"ADHD|autism|major\s+depressive\s+disorder|depression|anxiety\s+disorder|"
