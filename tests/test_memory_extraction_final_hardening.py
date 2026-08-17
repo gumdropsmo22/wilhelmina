@@ -17,6 +17,7 @@ from services.database import initialize_database, managed_connection
         "I have rheumatoid arthritis",
         "I have dementia",
         "I suffer from migraines",
+        "I suffer with anorexia nervosa",
         "driver licence D1234567",
         "auth token: abcdefgh123456",
     ],
@@ -26,7 +27,14 @@ def test_final_sensitive_variants_are_rejected_before_extraction(text):
         memory_extraction.guard_extractable_text(text)
 
 
-def test_generalized_diagnosis_is_rejected_before_queue_persistence(tmp_path):
+@pytest.mark.parametrize(
+    "content",
+    [
+        "I have rheumatoid arthritis",
+        "I suffer with anorexia nervosa",
+    ],
+)
+def test_generalized_diagnosis_is_rejected_before_queue_persistence(tmp_path, content):
     path = tmp_path / "wilhelmina.sqlite3"
     initialize_database(path)
 
@@ -42,7 +50,7 @@ def test_generalized_diagnosis_is_rejected_before_queue_persistence(tmp_path):
                 channel_id=10,
                 message_id=501,
                 jump_url="https://discord.com/channels/100/10/501",
-                content="I have rheumatoid arthritis",
+                content=content,
                 source_created_at="2026-08-17T02:00:00+00:00",
             )
         count = connection.execute(
@@ -81,6 +89,15 @@ def test_generalized_diagnosis_is_rejected_before_queue_persistence(tmp_path):
             "importance": 60,
             "confidence": 95,
             "entities": [{"type": "term", "key": "I suffer from migraines"}],
+        },
+        {
+            "category": "Preference",
+            "epistemic_label": "Fact",
+            "summary": "I suffer with anorexia nervosa",
+            "topic_key": "health.private",
+            "importance": 60,
+            "confidence": 95,
+            "entities": [],
         },
     ],
 )
