@@ -185,7 +185,7 @@ class MemoryExtraction(commands.Cog):
         assert eligibility.source_context is not None
         content = str(message.content or "")
         edited_at = (
-            message.edited_at.isoformat(timespec="seconds")
+            message.edited_at.isoformat(timespec="microseconds")
             if edited and message.edited_at is not None
             else None
         )
@@ -227,7 +227,7 @@ class MemoryExtraction(commands.Cog):
                     message_id=message.id,
                     jump_url=message.jump_url if eligibility.source_context == "guild" else None,
                     content=content,
-                    source_created_at=message.created_at.isoformat(timespec="seconds"),
+                    source_created_at=message.created_at.isoformat(timespec="microseconds"),
                     source_edited_at=edited_at,
                 )
         except memory_ledger.BlockedMemoryContent:
@@ -484,6 +484,7 @@ class MemoryExtraction(commands.Cog):
         initialize_database(_database_path(self.bot))
         with managed_connection(_database_path(self.bot)) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            memory_extraction.expire_stale_jobs(connection)
             current = memory_extraction.get_job(connection, job.id)
             if (
                 current is None
