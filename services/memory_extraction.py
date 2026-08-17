@@ -210,7 +210,7 @@ def _now() -> datetime:
 
 
 def _iso(value: datetime) -> str:
-    return value.isoformat(timespec="seconds")
+    return value.isoformat()
 
 
 def normalize_source_timestamp(value: str) -> str:
@@ -222,7 +222,7 @@ def normalize_source_timestamp(value: str) -> str:
         raise ExtractionError("source edit timestamp is invalid") from exc
     if parsed.tzinfo is None:
         raise ExtractionError("source edit timestamp must be timezone-aware")
-    return parsed.astimezone(UTC).isoformat(timespec="microseconds")
+    return parsed.astimezone(UTC).isoformat()
 
 
 def source_edit_is_newer(job: ExtractionJob, edited_at: str) -> bool:
