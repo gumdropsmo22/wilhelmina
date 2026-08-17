@@ -82,6 +82,10 @@ def test_final_ttl_gate_revokes_processing_claim_before_apply(tmp_path, monkeypa
             source_created_at="2026-08-17T00:00:00.500000+00:00",
             source_edited_at="2026-08-17T00:00:00.500000+00:00",
         )
+        connection.execute(
+            "UPDATE memory_extraction_jobs SET available_at = ? WHERE id = ?",
+            ("2026-08-17T00:59:58+00:00", queued.id),
+        )
         claimed = memory_extraction.claim_next_job(connection)
         assert claimed is not None
         assert claimed.status == "processing"
