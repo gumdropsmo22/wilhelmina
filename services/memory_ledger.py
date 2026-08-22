@@ -45,7 +45,6 @@ BLOCKED_PATTERNS = (
         r"\b(?:passport|national id|identity document|social security|ssn)\b",
         re.IGNORECASE,
     ),
-    re.compile(r"\b(?:diagnosed|diagnosis)\b", re.IGNORECASE),
     re.compile(r"\b(?:home address|residential address)\b", re.IGNORECASE),
 )
 
@@ -59,7 +58,7 @@ class MemoryNotFound(MemoryLedgerError):
 
 
 class BlockedMemoryContent(MemoryLedgerError):
-    """Raised when prohibited sensitive content is submitted."""
+    """Raised when dangerous secret/private content is submitted."""
 
 
 @dataclass(frozen=True)
@@ -452,7 +451,6 @@ def initialize_memory_schema(connection: sqlite3.Connection) -> None:
     for statement in SCHEMA_STATEMENTS:
         connection.execute(statement)
 
-    # Existing v6 tables must gain v9 columns before indexes reference them.
     _migrate_memory_records_v9(connection)
     _migrate_receipts_v9(connection)
     _ensure_record_indexes(connection)
@@ -556,11 +554,11 @@ def _validate_content(*values: str) -> None:
     joined = "\n".join(values)
     for pattern in BLOCKED_PATTERNS:
         if pattern.search(joined):
-            raise BlockedMemoryContent("Memory contains prohibited sensitive information")
+            raise BlockedMemoryContent("Memory contains prohibited dangerous-secret information")
 
 
 def validate_extractable_text(text: str) -> str:
-    """Reject prohibited information before text is sent to an external extractor."""
+    """Reject dangerous secrets before text is sent to an external extractor."""
 
     cleaned = _clean_text(text, field="message text", limit=4000)
     _validate_content(cleaned)

@@ -151,14 +151,12 @@ def test_structured_schema_excludes_admin_notes_and_bounds_arrays():
     )
 
 
-def test_sensitive_guard_rejects_before_queue(database_path):
+def test_dangerous_secret_guard_rejects_before_queue(database_path):
     blocked = (
         "My API key is sk-abcdefghijklmnopqrstuvwxyz1234567890",
         "My SSN is 123-45-6789",
         "Ship it to 123 Main Street",
         "Card 4111 1111 1111 1111",
-        "I have HIV",
-        "I am bipolar",
         "My AWS access key is AKIAIOSFODNN7EXAMPLE",
         "client secret: verysecretcredential123456",
     )
@@ -170,6 +168,20 @@ def test_sensitive_guard_rejects_before_queue(database_path):
             "SELECT COUNT(*) AS count FROM memory_extraction_jobs"
         ).fetchone()["count"]
     assert count == 0
+
+
+def test_sensitive_social_subjects_are_not_blocked_by_content_guard():
+    allowed = (
+        "I have HIV",
+        "I am bipolar",
+        "I was diagnosed with Crohn's disease",
+        "I hooked up with my ex",
+        "I am Muslim",
+        "I am bisexual",
+        "I got drunk last night",
+    )
+    for content in allowed:
+        assert memory_extraction.guard_extractable_text(content) == content
 
 
 def test_enqueue_is_idempotent_and_edit_requeues_latest_content(database_path):
@@ -293,7 +305,7 @@ def test_proposal_rejects_admin_notes_and_unmentioned_member_entities():
         )
 
 
-def test_proposal_sensitive_topic_and_term_are_rejected():
+def test_proposal_secret_topic_and_term_are_rejected():
     base = {
         "category": "Preference",
         "epistemic_label": "Fact",

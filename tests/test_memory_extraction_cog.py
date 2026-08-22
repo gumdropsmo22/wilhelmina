@@ -10,6 +10,7 @@ from services import (
     coven_registry,
     memory_extraction,
     memory_extraction_provider,
+    memory_extraction_retention,
     memory_ledger,
     member_profiles,
 )
@@ -200,7 +201,7 @@ async def test_enqueue_rechecks_pause_in_same_write_transaction(database_path, m
 
 
 @pytest.mark.asyncio
-async def test_uncached_sensitive_raw_edit_cancels_old_queue(database_path, monkeypatch):
+async def test_uncached_secret_raw_edit_cancels_old_queue(database_path, monkeypatch):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
     _grant_consent(database_path)
     with managed_connection(database_path) as connection:
@@ -222,7 +223,7 @@ async def test_uncached_sensitive_raw_edit_cancels_old_queue(database_path, monk
         guild_id=100,
         message_id=500,
         data={
-            "content": "Actually I have HIV",
+            "content": "auth token: abcdefgh123456",
             "edited_timestamp": "2026-08-13T10:05:00+00:00",
         },
     )
@@ -235,6 +236,79 @@ async def test_uncached_sensitive_raw_edit_cancels_old_queue(database_path, monk
     assert current.content is None
     assert current.claim_token is None
     assert current.last_error_code == "source_edited"
+
+
+@pytest.mark.asyncio
+async def test_worker_discards_provider_result_that_crosses_absolute_ttl(
+    database_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
+    _grant_consent(database_path)
+    monkeypatch.setattr(memory_extraction_provider, "provider_ready", lambda: True)
+    monkeypatch.setattr(
+        memory_extraction_retention,
+        "expire_transient_source_text",
+        lambda _connection: 0,
+    )
+
+    before_expiry = datetime(2026, 8, 22, 11, 59, 59, tzinfo=UTC)
+    after_expiry = datetime(2026, 8, 22, 12, 0, 0, 500001, tzinfo=UTC)
+    monkeypatch.setattr(memory_extraction, "_now", lambda: before_expiry)
+
+    with managed_connection(database_path) as connection:
+        queued = memory_extraction.enqueue_message(
+            connection,
+            guild_id=100,
+            subject_user_id=2,
+            source_context="guild",
+            author_user_id=2,
+            channel_id=10,
+            message_id=700,
+            jump_url="https://discord.com/channels/100/10/700",
+            content="I prefer tea",
+            source_created_at="2026-08-22T11:00:00.500000+00:00",
+            source_edited_at="2026-08-22T11:00:00.500000+00:00",
+        )
+
+    async def late_result(**_kwargs):
+        monkeypatch.setattr(memory_extraction, "_now", lambda: after_expiry)
+        return SimpleNamespace(
+            payload={
+                "candidates": [
+                    {
+                        "category": "Preference",
+                        "epistemic_label": "Fact",
+                        "summary": "Prefers tea",
+                        "topic_key": "drink.tea",
+                        "importance": 60,
+                        "confidence": 95,
+                        "entities": [],
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(memory_extraction_provider, "extract_structured", late_result)
+    cog = _cog(database_path)
+    await MemoryExtraction.worker.coro(cog)
+
+    with managed_connection(database_path) as connection:
+        current = memory_extraction.get_job(connection, queued.id)
+        memory_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM memory_records"
+        ).fetchone()["count"]
+        receipt_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM memory_receipts"
+        ).fetchone()["count"]
+
+    assert current is not None
+    assert current.status == "rejected"
+    assert current.content is None
+    assert current.claim_token is None
+    assert current.last_error_code == "queue_expired"
+    assert memory_count == 0
+    assert receipt_count == 0
 
 
 def test_mentioned_member_ids_are_deduped_and_exclude_wilhelmina():

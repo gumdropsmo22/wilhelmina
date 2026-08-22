@@ -108,16 +108,37 @@ def _candidate(**overrides):
     return value
 
 
-def test_review_sensitive_forms_are_rejected_before_queue(database_path):
-    blocked = (
+def test_review_socially_sensitive_forms_are_allowed_before_queue(database_path):
+    allowed = (
         "I have lupus",
         "I have Parkinson disease",
-        "My driver license is D1234567",
-        "My AWS secret access key QWERTYUIOPASDFGHJKLZXCVBNM123456",
         "I was diagnosed with a rare neurological condition",
+        "I have bipolar disorder",
+        "I take medication for ADHD",
+        "I hooked up with my ex last night",
+        "I am Muslim",
+        "I am bisexual",
+        "I got drunk at the party",
+        "I lied about why I missed work",
     )
     with managed_connection(database_path) as connection:
-        for index, content in enumerate(blocked, start=600):
+        for index, content in enumerate(allowed, start=600):
+            queued = _enqueue(connection, content=content, message_id=index)
+            assert queued.content == content
+        count = connection.execute(
+            "SELECT COUNT(*) AS count FROM memory_extraction_jobs"
+        ).fetchone()["count"]
+    assert count == len(allowed)
+
+
+def test_review_actual_secret_forms_are_rejected_before_queue(database_path):
+    blocked = (
+        "My driver license is D1234567",
+        "My AWS secret access key QWERTYUIOPASDFGHJKLZXCVBNM123456",
+        "auth token: abcdefgh123456",
+    )
+    with managed_connection(database_path) as connection:
+        for index, content in enumerate(blocked, start=700):
             with pytest.raises(memory_ledger.BlockedMemoryContent):
                 _enqueue(connection, content=content, message_id=index)
         count = connection.execute(
@@ -126,10 +147,25 @@ def test_review_sensitive_forms_are_rejected_before_queue(database_path):
     assert count == 0
 
 
-def test_review_sensitive_forms_are_rejected_from_model_output():
+def test_review_sensitive_social_forms_are_allowed_from_model_output():
     payloads = (
         {"candidates": [_candidate(summary="I have lupus")]},
         {"candidates": [_candidate(topic_key="Parkinson disease")]},
+        {
+            "candidates": [
+                _candidate(
+                    entities=[{"type": "term", "key": "diagnosed neurological condition"}]
+                )
+            ]
+        },
+    )
+    for payload in payloads:
+        proposal = memory_extraction.parse_proposal(payload)
+        assert len(proposal.candidates) == 1
+
+
+def test_review_actual_secret_forms_are_rejected_from_model_output():
+    payloads = (
         {
             "candidates": [
                 _candidate(
@@ -152,6 +188,7 @@ def test_review_sensitive_forms_are_rejected_from_model_output():
                 )
             ]
         },
+        {"candidates": [_candidate(topic_key="auth token: abcdefgh123456")]},
     )
     for payload in payloads:
         with pytest.raises(memory_ledger.BlockedMemoryContent):

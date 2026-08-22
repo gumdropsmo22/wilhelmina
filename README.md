@@ -236,9 +236,9 @@ OPENAI_RETENTION_MODE=mam
 
 `zdr` may be used instead of `mam` when that approved project configuration is available. The environment value is only a deployment assertion; the corresponding retention control must actually be configured for the OpenAI project. Private extraction requests use `store=false`.
 
-Enabling extraction requests Discord's Message Content intent, which must also be enabled in the Discord Developer Portal. The persistent Memory Ledger collection gate must be resumed, and each author must have the current versioned adult-memory consent.
+Enabling extraction requests Discord's Message Content intent, which must also be enabled in the Discord Developer Portal. The persistent Memory Ledger collection gate must be resumed. The current exact-version adult-memory consent check remains only as temporary compatibility with the merged identity schema and is scheduled for removal in the separate post-Phase-4 identity/profile cleanup; it is not the long-term product contract.
 
-Phase 4 uses schema v11 queue ownership with per-claim tokens, absolute raw-text TTL cleanup, atomic authorization before queue persistence, uncached/raw edit handling, and deterministic sensitive-data rejection both before OpenAI and after structured model output. SQLite/Python remain authoritative; the model cannot authorize access or mutate memory directly.
+Phase 4 uses schema v11 queue ownership with per-claim tokens, absolute raw-text TTL cleanup, atomic authorization before queue persistence, uncached/raw edit handling, and deterministic dangerous-secret rejection both before OpenAI and after structured model output. Medical, mental-health, adult relationship/sexual, political, religious, identity, substance-use, embarrassing, gossip, and other socially sensitive material is not blocked merely because of its subject category. SQLite/Python remain authoritative; the model cannot authorize access or mutate memory directly.
 
 For upgrades from the earlier v10 extraction draft, stop/drain old workers before enabling v11. v11 invalidates leftover tokenless processing rows and installs database enforcement that prevents old-style tokenless claims from entering `processing`.
 

@@ -9,7 +9,7 @@ The pipeline is deliberately narrow:
 ```txt
 Discord human text
   -> local eligibility gates
-  -> local sensitive-data guard
+  -> local dangerous-secret guard
   -> durable SQLite queue
   -> private OpenAI structured extraction
   -> deterministic Python validation
@@ -35,6 +35,8 @@ If any gate fails, private content does not enter OpenAI extraction.
 
 Mutable authorization is checked more than once. The event path re-checks home guild, runtime mode, persistent pause/resume state, current consent, and interaction scope inside a SQLite `BEGIN IMMEDIATE` transaction immediately before queue persistence. A claimed job re-checks authorization immediately before the provider request and again inside a write transaction immediately before any Memory Ledger mutation.
 
+The exact-version consent dependency above is retained only as temporary Phase-4 compatibility with the currently merged identity schema. Repository doctrine marks that authorization architecture as technical debt for the separate post-Phase-4 migration; this tranche does not expand or re-legitimize it.
+
 ## Eligible Discord text
 
 Phase 4 collects only human-authored text in the dedicated home server context:
@@ -44,7 +46,7 @@ Phase 4 collects only human-authored text in the dedicated home server context:
 - a guild message that mentions Wilhelmina;
 - a guild reply whose resolved referenced message was authored by Wilhelmina.
 
-Bots, webhooks, empty/non-text messages, other guilds, missing/legacy consent, and paused/off collection are rejected locally.
+Bots, webhooks, empty/non-text messages, other guilds, missing/legacy consent under the temporary compatibility gate, and paused/off collection are rejected locally.
 
 Attachments, media, embeds, files, and external-link contents are not read by the extractor. Only the message's own text enters the pipeline.
 
@@ -52,15 +54,15 @@ Attachments, media, embeds, files, and external-link contents are not read by th
 
 Even if all future ambient environment gates are set, Phase 4 still rejects unaddressed guild chatter outside the designated Wilhelmina channel. Whole-server ears remain a later approved tranche.
 
-## Sensitive-data guard
+## Dangerous-secret guard
 
-`services.memory_extraction.guard_extractable_text()` runs before queue persistence and before an OpenAI request. It composes the Memory Ledger guard with deterministic local detection for credentials/secrets, common provider token forms, government/private identifiers, exact street-address shapes, Luhn-valid payment-card numbers, and medical or mental-health diagnosis disclosures.
+`services.memory_extraction.guard_extractable_text()` runs before queue persistence and before an OpenAI request. It composes the Memory Ledger guard with deterministic local detection for credentials/secrets, common provider token forms, government/private identifiers, exact street-address shapes, and Luhn-valid payment-card numbers.
 
-The guard covers both recognizable secret formats and labelled forms such as access keys, secret access keys, client secrets, private tokens, passports, national IDs, driver licenses, and comparable identifiers. Diagnosis handling combines explicit diagnosis language with disease/disorder/syndrome forms and high-risk named conditions. Sexuality is not treated as a prohibited diagnosis category.
+The guard covers recognizable secret formats and labelled forms such as access keys, secret access keys, client secrets, private tokens, passports, national IDs, driver licenses, and comparable identifiers. It does **not** reject content merely because the subject matter is medical, mental-health related, sexual between adults, romantic, political, religious, identity-related, substance-related, embarrassing, rude, or otherwise socially sensitive.
 
-Blocked content is not enqueued and is not sent to OpenAI.
+Blocked dangerous-secret content is not enqueued and is not sent to OpenAI.
 
-Every model-controlled persisted string is checked again after structured extraction. Summary text, raw topic keys, and term entity keys all pass through the same prohibited-content guard before normalization or Memory Ledger mutation. A model cannot smuggle a credential or diagnosis into metadata after the source text passed inspection.
+Every model-controlled persisted string is checked again after structured extraction. Summary text, raw topic keys, and term entity keys all pass through the same dangerous-secret guard before normalization or Memory Ledger mutation. A model cannot smuggle a credential, private identifier, payment secret, or doxxing-grade address into metadata after the source text passed inspection.
 
 ### Raw message edits
 
@@ -72,13 +74,13 @@ For a known source message, one `BEGIN IMMEDIATE` transaction performs the edit 
 2. ignore an older/equal edit if a newer edit version is already recorded;
 3. cancel outstanding queue work and advance the content-free edit version;
 4. re-check runtime/pause/home-guild/current-consent authorization;
-5. only after authorization, inspect the new text with the sensitive-data guard;
+5. only after authorization, inspect the new text with the dangerous-secret guard;
 6. update receipt edit text only when authorized;
 7. requeue the newest safe version only when current interaction scope and provider gates still pass.
 
 This ordering prevents a revoked-consent edit from writing new raw text into receipts and prevents two bot processes from letting a late older edit overwrite a newer queued version.
 
-If an authorized edit trips the sensitive-data guard, the raw sensitive text is not queued or copied into the receipt. The receipt stores only:
+If an authorized edit trips the dangerous-secret guard, the raw secret text is not queued or copied into the receipt. The receipt stores only:
 
 ```txt
 [edited content withheld by sensitive-data guard]
@@ -128,7 +130,7 @@ Outstanding source text is transient queue material, not canonical memory. `serv
 
 Retention runs independently from the provider worker as well as during normal worker passes. A provider coroutine therefore cannot hold raw source text past the TTL by remaining in `processing`.
 
-When a processing row expires, retention clears its content and claim token. Any subsequently returned provider result fails ownership validation and is discarded without mutation.
+The worker also performs an expiry sweep inside the final `BEGIN IMMEDIATE` transaction after the provider returns and before proposal reconciliation. When a processing row expires, its content and claim token are cleared. Any subsequently returned provider result fails current-row/ownership validation and is discarded without creating memory or receipts.
 
 ## Structured OpenAI extraction
 
@@ -199,12 +201,12 @@ Discord deletion events do not erase the receipt. They set `source_deleted_at`, 
 
 The feature fails closed:
 
-- missing current consent -> no queue;
+- missing current consent under the temporary compatibility architecture -> no queue;
 - collection off/paused -> no queue;
 - private OpenAI retention gate unavailable -> no queue;
-- sensitive source -> no queue;
+- dangerous-secret source -> no queue;
 - revoked-consent edit -> outstanding job cancelled, edit version advanced, no new receipt text persisted;
-- sensitive authorized edit -> outstanding job cancelled, secret not persisted, receipt gets only the safe marker;
+- dangerous-secret authorized edit -> outstanding job cancelled, secret not persisted, receipt gets only the safe marker;
 - stale older raw edit -> ignored without overwriting newer queue/receipt state;
 - queued job loses consent/pause/runtime authorization before provider -> reject before provider;
 - authorization changes while provider is running -> reject before mutation;
@@ -212,9 +214,11 @@ The feature fails closed:
 - expired lease -> revoke claim token before retry/reclaim;
 - unprocessed or in-flight raw source text older than one hour -> reject, erase text, revoke claim;
 - invalid structured proposal -> reject without mutation;
-- prohibited model metadata -> reject without mutation;
+- dangerous secret in model-controlled metadata -> reject without mutation;
 - conflicting ordinary same-topic candidates -> reject during preflight before mutation;
 - source deletion clears queued text and marks existing receipts deleted.
+
+Health, mental-health, adult relationship/sexual, political, religious, identity, substance-use, embarrassing, gossip, and other socially sensitive material is not a failure condition merely because of its subject category.
 
 ## Deployment / rollback
 
@@ -258,13 +262,15 @@ Regression coverage includes:
 
 - schema v11 initialization and v10 -> v11 migration;
 - legacy tokenless processing-claim invalidation and old-style claim rejection;
-- pre-AI diagnosis/credential/private-ID/payment/address rejection;
-- post-model summary/topic/entity sensitive-data rejection;
+- permissiveness regressions for medical/mental-health/adult/socially sensitive subject matter;
+- pre-AI credential/private-ID/payment/address rejection;
+- post-model summary/topic/entity dangerous-secret rejection;
 - idempotent enqueue/edit requeue;
 - exact claim-token ownership across lease expiry/reclaim;
 - bounded retries and terminal text clearing;
 - absolute raw-text retention for pending, retry, and in-flight processing rows;
-- uncached/raw sensitive edit cancellation;
+- full worker-path provider-return-after-TTL rejection with zero memory/receipt mutation;
+- uncached/raw dangerous-secret edit cancellation;
 - revoked-consent edit cancellation without receipt-text persistence;
 - out-of-order rapid edit versioning where the newest edit wins;
 - strict proposal validation;
@@ -273,7 +279,7 @@ Regression coverage includes:
 - deterministic memory/receipt/entity creation;
 - source deletion handling;
 - atomic mutable authorization re-check at enqueue and before mutation;
-- consent/runtime/pause/home-guild/interaction eligibility;
+- consent/runtime/pause/home-guild/interaction eligibility under the temporary compatibility architecture;
 - ambient-mode non-activation;
 - strict provider schema + `store=False` request shape;
 - least-privilege Message Content intent configuration.

@@ -18,13 +18,39 @@ from services.database import initialize_database, managed_connection
         "I have dementia",
         "I suffer from migraines",
         "I suffer with anorexia nervosa",
-        "driver licence D1234567",
-        "auth token: abcdefgh123456",
+        "I have bipolar disorder",
+        "I take medication for ADHD",
+        "I hooked up with my ex last night",
+        "I think the mayor is useless",
+        "I am Muslim",
+        "I am bisexual",
+        "I got drunk at the party",
+        "I lied about why I missed work",
     ],
 )
-def test_final_sensitive_variants_are_rejected_before_extraction(text):
+def test_socially_sensitive_content_is_not_blocked_before_extraction(text):
+    assert memory_extraction.guard_extractable_text(text) == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "driver licence D1234567",
+        "auth token: abcdefgh123456",
+        "password: hunter2hunter2",
+        "My API key is sk-abcdefghijklmnopqrstuvwxyz1234567890",
+        "Ship it to 123 Main Street",
+        "Card 4111 1111 1111 1111",
+    ],
+)
+def test_actual_secrets_and_identifiers_remain_blocked_before_extraction(text):
     with pytest.raises(memory_ledger.BlockedMemoryContent):
         memory_extraction.guard_extractable_text(text)
+
+
+def test_base_memory_ledger_no_longer_blocks_diagnosis_language():
+    text = "I was diagnosed with Crohn's disease"
+    assert memory_ledger.validate_extractable_text(text) == text
 
 
 @pytest.mark.parametrize(
@@ -32,39 +58,41 @@ def test_final_sensitive_variants_are_rejected_before_extraction(text):
     [
         "I have rheumatoid arthritis",
         "I suffer with anorexia nervosa",
+        "I have bipolar disorder",
+        "I take medication for ADHD",
     ],
 )
-def test_generalized_diagnosis_is_rejected_before_queue_persistence(tmp_path, content):
+def test_sensitive_social_content_can_enter_queue_when_other_gates_allow(tmp_path, content):
     path = tmp_path / "wilhelmina.sqlite3"
     initialize_database(path)
 
     with managed_connection(path) as connection:
         memory_extraction.initialize_extraction_schema(connection)
-        with pytest.raises(memory_ledger.BlockedMemoryContent):
-            memory_extraction.enqueue_message(
-                connection,
-                guild_id=100,
-                subject_user_id=2,
-                source_context="guild",
-                author_user_id=2,
-                channel_id=10,
-                message_id=501,
-                jump_url="https://discord.com/channels/100/10/501",
-                content=content,
-                source_created_at="2026-08-17T02:00:00+00:00",
-            )
+        queued = memory_extraction.enqueue_message(
+            connection,
+            guild_id=100,
+            subject_user_id=2,
+            source_context="guild",
+            author_user_id=2,
+            channel_id=10,
+            message_id=501,
+            jump_url="https://discord.com/channels/100/10/501",
+            content=content,
+            source_created_at="2026-08-17T02:00:00+00:00",
+        )
         count = connection.execute(
             "SELECT COUNT(*) AS count FROM memory_extraction_jobs"
         ).fetchone()["count"]
 
-    assert count == 0
+    assert queued.content == content
+    assert count == 1
 
 
 @pytest.mark.parametrize(
     "candidate",
     [
         {
-            "category": "Preference",
+            "category": "Identity",
             "epistemic_label": "Fact",
             "summary": "I have hepatitis C",
             "topic_key": "health.private",
@@ -73,25 +101,25 @@ def test_generalized_diagnosis_is_rejected_before_queue_persistence(tmp_path, co
             "entities": [],
         },
         {
-            "category": "Preference",
+            "category": "Identity",
             "epistemic_label": "Fact",
-            "summary": "Private health detail",
+            "summary": "Lives with dementia",
             "topic_key": "I have dementia",
             "importance": 60,
             "confidence": 95,
             "entities": [],
         },
         {
-            "category": "Preference",
+            "category": "Identity",
             "epistemic_label": "Fact",
-            "summary": "Private health detail",
-            "topic_key": "health.private",
+            "summary": "Gets migraines",
+            "topic_key": "health.migraines",
             "importance": 60,
             "confidence": 95,
             "entities": [{"type": "term", "key": "I suffer from migraines"}],
         },
         {
-            "category": "Preference",
+            "category": "Identity",
             "epistemic_label": "Fact",
             "summary": "I suffer with anorexia nervosa",
             "topic_key": "health.private",
@@ -101,9 +129,9 @@ def test_generalized_diagnosis_is_rejected_before_queue_persistence(tmp_path, co
         },
     ],
 )
-def test_generalized_diagnosis_is_rejected_from_model_output(candidate):
-    with pytest.raises(memory_ledger.BlockedMemoryContent):
-        memory_extraction.parse_proposal({"candidates": [candidate]})
+def test_sensitive_social_content_is_not_rejected_from_model_output(candidate):
+    proposal = memory_extraction.parse_proposal({"candidates": [candidate]})
+    assert len(proposal.candidates) == 1
 
 
 def test_source_edit_ordering_preserves_subsecond_precision():
