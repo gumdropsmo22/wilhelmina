@@ -270,6 +270,10 @@ async def test_worker_discards_provider_result_that_crosses_absolute_ttl(
             source_created_at="2026-08-22T11:00:00.500000+00:00",
             source_edited_at="2026-08-22T11:00:00.500000+00:00",
         )
+        connection.execute(
+            "UPDATE memory_extraction_jobs SET available_at = ? WHERE id = ?",
+            ("2026-08-22T11:59:58+00:00", queued.id),
+        )
 
     async def late_result(**_kwargs):
         monkeypatch.setattr(memory_extraction, "_now", lambda: after_expiry)
