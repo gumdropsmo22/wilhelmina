@@ -283,6 +283,8 @@ async def test_worker_discards_provider_result_that_crosses_absolute_ttl(
                     {
                         "category": "Preference",
                         "epistemic_label": "Fact",
+                        "claim_subject": "author",
+                        "claim_attribution": "self",
                         "summary": "Prefers tea",
                         "topic_key": "drink.tea",
                         "importance": 60,
