@@ -94,6 +94,8 @@ def test_sensitive_social_content_can_enter_queue_when_other_gates_allow(tmp_pat
         {
             "category": "Identity",
             "epistemic_label": "Fact",
+            "claim_subject": "author",
+            "claim_attribution": "self",
             "summary": "I have hepatitis C",
             "topic_key": "health.private",
             "importance": 60,
@@ -103,6 +105,8 @@ def test_sensitive_social_content_can_enter_queue_when_other_gates_allow(tmp_pat
         {
             "category": "Identity",
             "epistemic_label": "Fact",
+            "claim_subject": "author",
+            "claim_attribution": "self",
             "summary": "Lives with dementia",
             "topic_key": "I have dementia",
             "importance": 60,
@@ -112,6 +116,8 @@ def test_sensitive_social_content_can_enter_queue_when_other_gates_allow(tmp_pat
         {
             "category": "Identity",
             "epistemic_label": "Fact",
+            "claim_subject": "author",
+            "claim_attribution": "self",
             "summary": "Gets migraines",
             "topic_key": "health.migraines",
             "importance": 60,
@@ -121,6 +127,8 @@ def test_sensitive_social_content_can_enter_queue_when_other_gates_allow(tmp_pat
         {
             "category": "Identity",
             "epistemic_label": "Fact",
+            "claim_subject": "author",
+            "claim_attribution": "self",
             "summary": "I suffer with anorexia nervosa",
             "topic_key": "health.private",
             "importance": 60,
