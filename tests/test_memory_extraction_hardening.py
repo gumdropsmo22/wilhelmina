@@ -157,6 +157,8 @@ def test_conflicting_ordinary_topics_are_rejected_before_any_mutation(database_p
                 {
                     "category": "Preference",
                     "epistemic_label": "Fact",
+                    "claim_subject": "author",
+                    "claim_attribution": "self",
                     "summary": "Prefers tea",
                     "topic_key": "drink.tea",
                     "importance": 60,
@@ -166,6 +168,8 @@ def test_conflicting_ordinary_topics_are_rejected_before_any_mutation(database_p
                 {
                     "category": "Dislike",
                     "epistemic_label": "Fact",
+                    "claim_subject": "author",
+                    "claim_attribution": "self",
                     "summary": "Dislikes tea",
                     "topic_key": "drink.tea",
                     "importance": 60,
