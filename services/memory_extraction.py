@@ -21,6 +21,12 @@ LEASE_SECONDS = 45
 QUEUE_CONTENT_TTL_SECONDS = 3600
 SENSITIVE_EDIT_MARKER = "[edited content withheld by sensitive-data guard]"
 VALID_JOB_STATES = ("pending", "processing", "retry", "completed", "rejected", "failed")
+VALID_CLAIM_SUBJECTS = ("author", "third_party")
+VALID_CLAIM_ATTRIBUTIONS = ("self", "author_report")
+VALID_CLAIM_PAIRS = {
+    ("author", "self"),
+    ("third_party", "author_report"),
+}
 
 TOKEN_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
@@ -71,6 +77,8 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
                 "required": [
                     "category",
                     "epistemic_label",
+                    "claim_subject",
+                    "claim_attribution",
                     "summary",
                     "topic_key",
                     "importance",
@@ -82,6 +90,14 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
                     "epistemic_label": {
                         "type": "string",
                         "enum": list(memory_ledger.VALID_LABELS),
+                    },
+                    "claim_subject": {
+                        "type": "string",
+                        "enum": list(VALID_CLAIM_SUBJECTS),
+                    },
+                    "claim_attribution": {
+                        "type": "string",
+                        "enum": list(VALID_CLAIM_ATTRIBUTIONS),
                     },
                     "summary": {"type": "string"},
                     "topic_key": {"type": "string"},
@@ -117,12 +133,16 @@ Do not save greetings, filler, transient logistics, one-off questions, bot instr
 credentials, financial data, exact private addresses, identity-document numbers, or other high-risk
 secrets. Medical, mental-health, relationship, sexual, political, religious, identity, substance-use,
 and other socially sensitive adult subject matter is not prohibited merely because it is sensitive.
-The memory subject is always the human author. Claims about another person are Gossip and must stay
-attributed/unverified rather than presented as fact. Corrections of the same subject should use a
-stable matching topic_key. Admin note is never valid for automatic extraction. Use member entities
-only for numeric IDs explicitly provided in mentioned_members. Use term entities sparingly for useful
-people/projects/topics. Confidence is 0-100. Return no candidate when nothing is worth remembering
-beyond the immediate exchange."""
+The Memory Ledger subject is always the human author. For every candidate, set claim_subject=author
+and claim_attribution=self only when the candidate describes the author's own state, preference,
+action, project, history, or other self-claim. Set claim_subject=third_party and
+claim_attribution=author_report whenever the substance of the claim is about another person, even
+when that person is explicitly mentioned. Third-party reports are Gossip and must stay attributed
+and unverified; local validation will force them to Gossip even if another label is proposed.
+Corrections of the same subject should use a stable matching topic_key. Admin note is never valid for
+automatic extraction. Use member entities only for numeric IDs explicitly provided in
+mentioned_members. Use term entities sparingly for useful people/projects/topics. Confidence is
+0-100. Return no candidate when nothing is worth remembering beyond the immediate exchange."""
 
 
 class ExtractionError(RuntimeError):
@@ -143,6 +163,8 @@ class ExtractionEntity:
 class MemoryCandidate:
     category: str
     epistemic_label: str
+    claim_subject: str
+    claim_attribution: str
     summary: str
     topic_key: str
     importance: int
@@ -470,18 +492,35 @@ def enqueue_message(
 
 
 def reset_stale_jobs(connection: sqlite3.Connection) -> int:
+    """Recover expired claims without permitting retries beyond MAX_ATTEMPTS."""
+
     initialize_extraction_schema(connection)
     now = _iso(_now())
-    cursor = connection.execute(
+    failed = connection.execute(
+        """
+        UPDATE memory_extraction_jobs
+        SET status = 'failed', content = NULL, lease_expires_at = NULL,
+            claim_token = NULL, last_error_code = 'stale_lease_attempt_limit', updated_at = ?
+        WHERE status = 'processing'
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at <= ?
+          AND attempts >= ?
+        """,
+        (now, now, MAX_ATTEMPTS),
+    )
+    retried = connection.execute(
         """
         UPDATE memory_extraction_jobs
         SET status = 'retry', lease_expires_at = NULL, claim_token = NULL, available_at = ?,
             last_error_code = 'stale_lease', updated_at = ?
-        WHERE status = 'processing' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+        WHERE status = 'processing'
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at <= ?
+          AND attempts < ?
         """,
-        (now, now, now),
+        (now, now, now, MAX_ATTEMPTS),
     )
-    return int(cursor.rowcount)
+    return int(failed.rowcount) + int(retried.rowcount)
 
 
 def expire_stale_jobs(connection: sqlite3.Connection) -> int:
@@ -616,10 +655,11 @@ def claim_next_job(connection: sqlite3.Connection) -> ExtractionJob | None:
         """
         SELECT id FROM memory_extraction_jobs
         WHERE status IN ('pending', 'retry') AND available_at <= ? AND content IS NOT NULL
+          AND attempts < ?
         ORDER BY available_at ASC, id ASC
         LIMIT 1
         """,
-        (now,),
+        (now, MAX_ATTEMPTS),
     ).fetchone()
     if row is None:
         return None
@@ -634,6 +674,7 @@ def claim_next_job(connection: sqlite3.Connection) -> ExtractionJob | None:
           AND status IN ('pending', 'retry')
           AND available_at <= ?
           AND content IS NOT NULL
+          AND attempts < ?
         """,
         (
             _iso(now_dt + timedelta(seconds=LEASE_SECONDS)),
@@ -641,6 +682,7 @@ def claim_next_job(connection: sqlite3.Connection) -> ExtractionJob | None:
             now,
             job_id,
             now,
+            MAX_ATTEMPTS,
         ),
     )
     if int(cursor.rowcount) != 1:
@@ -774,13 +816,17 @@ def parse_proposal(
             raise InvalidProposal("candidate must be an object")
         category = str(raw.get("category", "")).strip()
         label = str(raw.get("epistemic_label", "")).strip()
+        claim_subject = str(raw.get("claim_subject", "")).strip().lower()
+        claim_attribution = str(raw.get("claim_attribution", "")).strip().lower()
+        if (claim_subject, claim_attribution) not in VALID_CLAIM_PAIRS:
+            raise InvalidProposal("invalid claim subject/attribution pair")
         if category == "Admin note":
             raise InvalidProposal("automatic extraction cannot create Admin notes")
         if category not in memory_ledger.VALID_CATEGORIES:
             raise InvalidProposal("unknown category")
         if label not in memory_ledger.VALID_LABELS:
             raise InvalidProposal("unknown epistemic label")
-        if category == "Gossip" or label == "Gossip":
+        if claim_subject == "third_party" or category == "Gossip" or label == "Gossip":
             category = label = "Gossip"
 
         summary = guard_extractable_text(str(raw.get("summary", "")))
@@ -815,6 +861,8 @@ def parse_proposal(
             MemoryCandidate(
                 category=category,
                 epistemic_label=label,
+                claim_subject=claim_subject,
+                claim_attribution=claim_attribution,
                 summary=summary,
                 topic_key=topic_key,
                 importance=importance,
