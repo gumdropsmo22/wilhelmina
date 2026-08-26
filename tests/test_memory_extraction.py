@@ -39,6 +39,31 @@ def _enqueue(connection, *, content: str, edited_at: str | None = None):
     )
 
 
+def _candidate(
+    *,
+    category="Preference",
+    label="Fact",
+    summary="Prefers tea",
+    topic="drink.tea",
+    claim_subject="author",
+    claim_attribution="self",
+    entities=None,
+    importance=70,
+    confidence=95,
+):
+    return {
+        "category": category,
+        "epistemic_label": label,
+        "claim_subject": claim_subject,
+        "claim_attribution": claim_attribution,
+        "summary": summary,
+        "topic_key": topic,
+        "importance": importance,
+        "confidence": confidence,
+        "entities": [{"type": "term", "key": "tea"}] if entities is None else entities,
+    }
+
+
 def _proposal(
     *,
     category="Preference",
@@ -49,15 +74,7 @@ def _proposal(
     return memory_extraction.parse_proposal(
         {
             "candidates": [
-                {
-                    "category": category,
-                    "epistemic_label": label,
-                    "summary": summary,
-                    "topic_key": topic,
-                    "importance": 70,
-                    "confidence": 95,
-                    "entities": [{"type": "term", "key": "tea"}],
-                }
+                _candidate(category=category, label=label, summary=summary, topic=topic)
             ]
         }
     )
@@ -140,11 +157,18 @@ def test_schema_v10_migrates_claim_token_in_place(tmp_path):
     assert "claim_token" in columns
 
 
-def test_structured_schema_excludes_admin_notes_and_bounds_arrays():
+def test_structured_schema_excludes_admin_notes_and_requires_claim_attribution():
     candidate_schema = memory_extraction.EXTRACTION_SCHEMA["properties"]["candidates"]
     assert candidate_schema["maxItems"] == memory_extraction.MAX_CANDIDATES
     item = candidate_schema["items"]
     assert "Admin note" not in item["properties"]["category"]["enum"]
+    assert "claim_subject" in item["required"]
+    assert "claim_attribution" in item["required"]
+    assert set(item["properties"]["claim_subject"]["enum"]) == {"author", "third_party"}
+    assert set(item["properties"]["claim_attribution"]["enum"]) == {
+        "self",
+        "author_report",
+    }
     assert (
         item["properties"]["entities"]["maxItems"]
         == memory_extraction.MAX_ENTITIES_PER_CANDIDATE
@@ -246,6 +270,30 @@ def test_failed_provider_retries_then_clears_content_at_terminal_failure(databas
     assert terminal.content is None
 
 
+def test_stale_lease_at_attempt_limit_fails_and_erases_content(database_path):
+    with managed_connection(database_path) as connection:
+        queued = _enqueue(connection, content="I prefer tea")
+        connection.execute(
+            """
+            UPDATE memory_extraction_jobs
+            SET status = 'processing', attempts = ?, claim_token = 'final-claim',
+                lease_expires_at = '2000-01-01T00:00:00+00:00'
+            WHERE id = ?
+            """,
+            (memory_extraction.MAX_ATTEMPTS, queued.id),
+        )
+        assert memory_extraction.reset_stale_jobs(connection) == 1
+        current = memory_extraction.get_job(connection, queued.id)
+        next_job = memory_extraction.claim_next_job(connection)
+
+    assert current is not None
+    assert current.status == "failed"
+    assert current.content is None
+    assert current.claim_token is None
+    assert current.last_error_code == "stale_lease_attempt_limit"
+    assert next_job is None
+
+
 def test_expired_claim_cannot_mutate_reclaimed_job(database_path):
     with managed_connection(database_path) as connection:
         _enqueue(connection, content="I prefer tea")
@@ -281,15 +329,7 @@ def test_expired_claim_cannot_mutate_reclaimed_job(database_path):
 
 
 def test_proposal_rejects_admin_notes_and_unmentioned_member_entities():
-    base = {
-        "category": "Preference",
-        "epistemic_label": "Fact",
-        "summary": "Prefers tea",
-        "topic_key": "drink.tea",
-        "importance": 50,
-        "confidence": 90,
-        "entities": [],
-    }
+    base = _candidate(entities=[])
     with pytest.raises(memory_extraction.InvalidProposal):
         memory_extraction.parse_proposal(
             {"candidates": [{**base, "category": "Admin note"}]}
@@ -305,16 +345,51 @@ def test_proposal_rejects_admin_notes_and_unmentioned_member_entities():
         )
 
 
+def test_proposal_rejects_missing_or_invalid_claim_attribution():
+    base = _candidate(entities=[])
+    missing = dict(base)
+    missing.pop("claim_subject")
+    with pytest.raises(memory_extraction.InvalidProposal):
+        memory_extraction.parse_proposal({"candidates": [missing]})
+    with pytest.raises(memory_extraction.InvalidProposal):
+        memory_extraction.parse_proposal(
+            {
+                "candidates": [
+                    {
+                        **base,
+                        "claim_subject": "third_party",
+                        "claim_attribution": "self",
+                    }
+                ]
+            }
+        )
+
+
+def test_third_party_claim_is_forced_to_gossip_even_if_model_calls_it_fact():
+    proposal = memory_extraction.parse_proposal(
+        {
+            "candidates": [
+                _candidate(
+                    category="Relationship context",
+                    label="Fact",
+                    summary="Says Alex is secretly seeing someone",
+                    topic="alex.dating",
+                    claim_subject="third_party",
+                    claim_attribution="author_report",
+                    entities=[],
+                )
+            ]
+        }
+    )
+    candidate = proposal.candidates[0]
+    assert candidate.claim_subject == "third_party"
+    assert candidate.claim_attribution == "author_report"
+    assert candidate.category == "Gossip"
+    assert candidate.epistemic_label == "Gossip"
+
+
 def test_proposal_secret_topic_and_term_are_rejected():
-    base = {
-        "category": "Preference",
-        "epistemic_label": "Fact",
-        "summary": "Prefers tea",
-        "topic_key": "drink.tea",
-        "importance": 50,
-        "confidence": 90,
-        "entities": [],
-    }
+    base = _candidate(entities=[])
     with pytest.raises(memory_ledger.BlockedMemoryContent):
         memory_extraction.parse_proposal(
             {
@@ -342,15 +417,17 @@ def test_gossip_is_normalized_and_low_confidence_is_not_applied(database_path):
     proposal = memory_extraction.parse_proposal(
         {
             "candidates": [
-                {
-                    "category": "Relationship context",
-                    "epistemic_label": "Gossip",
-                    "summary": "Says Alex is secretly seeing someone",
-                    "topic_key": "alex.dating",
-                    "importance": 60,
-                    "confidence": 69,
-                    "entities": [],
-                }
+                _candidate(
+                    category="Relationship context",
+                    label="Gossip",
+                    summary="Says Alex is secretly seeing someone",
+                    topic="alex.dating",
+                    claim_subject="third_party",
+                    claim_attribution="author_report",
+                    entities=[],
+                    importance=60,
+                    confidence=69,
+                )
             ]
         }
     )
