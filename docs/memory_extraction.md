@@ -25,7 +25,7 @@ Automatic extraction requires all of the following:
 1. `ENABLE_MEMORY_EXTRACTION=true` so `cogs.memory_extraction` is loaded.
 2. `MEMORY_COLLECTION_MODE=interaction` (or `ambient`, which still behaves interaction-only in Phase 4).
 3. The persistent Memory Ledger collection gate is resumed.
-4. The author has the current versioned adult-memory consent.
+4. The author has a completed private identity profile.
 5. A usable OpenAI API runtime exists.
 6. `OPENAI_RETENTION_MODE=mam` or `zdr` is asserted for the deployment and actually configured in the OpenAI project.
 
@@ -33,9 +33,9 @@ If any gate fails, private content does not enter OpenAI extraction.
 
 `ENABLE_MEMORY_EXTRACTION` defaults to `false`. Enabling it also requests Discord's Message Content gateway intent. Configure that intent in the Discord Developer Portal before enabling the feature in a deployment.
 
-Mutable authorization is checked more than once. The event path re-checks home guild, runtime mode, persistent pause/resume state, current consent, and interaction scope inside a SQLite `BEGIN IMMEDIATE` transaction immediately before queue persistence. A claimed job re-checks authorization immediately before the provider request and again inside a write transaction immediately before any Memory Ledger mutation.
+Mutable authorization is checked more than once. The event path re-checks home guild, runtime mode, persistent pause/resume state, member profile state, and interaction scope inside a SQLite `BEGIN IMMEDIATE` transaction immediately before queue persistence. A claimed job re-checks authorization immediately before the provider request and again inside a write transaction immediately before any Memory Ledger mutation.
 
-The exact-version consent dependency above is retained only as temporary Phase-4 compatibility with the currently merged identity schema. Repository doctrine marks that authorization architecture as technical debt for the separate post-Phase-4 migration; this tranche does not expand or re-legitimize it.
+The old `profile_has_current_consent(...)` helper name remains only as a compatibility alias for the already-reviewed Phase-4 worker. It now delegates to profile-state eligibility and does **not** inspect `adult_memory_consent_at` or `memory_consent_version`. Those schema-v8 columns are non-authoritative compatibility data pending the later physical migration.
 
 ## Eligible Discord text
 
@@ -46,7 +46,7 @@ Phase 4 collects only human-authored text in the dedicated home server context:
 - a guild message that mentions Wilhelmina;
 - a guild reply whose resolved referenced message was authored by Wilhelmina.
 
-Bots, webhooks, empty/non-text messages, other guilds, missing/legacy consent under the temporary compatibility gate, and paused/off collection are rejected locally.
+Bots, webhooks, empty/non-text messages, other guilds, missing identity profiles, and paused/off collection are rejected locally.
 
 Attachments, media, embeds, files, and external-link contents are not read by the extractor. Only the message's own text enters the pipeline.
 
@@ -73,12 +73,12 @@ For a known source message, one `BEGIN IMMEDIATE` transaction performs the edit 
 1. normalize and compare the Discord edit timestamp;
 2. ignore an older/equal edit if a newer edit version is already recorded;
 3. cancel outstanding queue work and advance the content-free edit version;
-4. re-check runtime/pause/home-guild/current-consent authorization;
+4. re-check runtime/pause/home-guild/profile-state authorization;
 5. only after authorization, inspect the new text with the dangerous-secret guard;
 6. update receipt edit text only when authorized;
 7. requeue the newest safe version only when current interaction scope and provider gates still pass.
 
-This ordering prevents a revoked-consent edit from writing new raw text into receipts and prevents two bot processes from letting a late older edit overwrite a newer queued version.
+This ordering prevents an unauthorized edit from writing new raw text into receipts and prevents two bot processes from letting a late older edit overwrite a newer queued version.
 
 If an authorized edit trips the dangerous-secret guard, the raw secret text is not queued or copied into the receipt. The receipt stores only:
 
@@ -209,14 +209,14 @@ Discord deletion events do not erase the receipt. They set `source_deleted_at`, 
 
 The feature fails closed:
 
-- missing current consent under the temporary compatibility architecture -> no queue;
+- missing completed identity profile -> no queue;
 - collection off/paused -> no queue;
 - private OpenAI retention gate unavailable -> no queue;
 - dangerous-secret source -> no queue;
-- revoked-consent edit -> outstanding job cancelled, edit version advanced, no new receipt text persisted;
+- unauthorized edit -> outstanding job cancelled, edit version advanced, no new receipt text persisted;
 - dangerous-secret authorized edit -> outstanding job cancelled, secret not persisted, receipt gets only the safe marker;
 - stale older raw edit -> ignored without overwriting newer queue/receipt state;
-- queued job loses consent/pause/runtime authorization before provider -> reject before provider;
+- queued job loses profile/pause/runtime authorization before provider -> reject before provider;
 - authorization changes while provider is running -> reject before mutation;
 - provider outage after enqueue -> retry;
 - expired lease below the attempt cap -> revoke claim token before retry/reclaim;
@@ -283,7 +283,7 @@ Regression coverage includes:
 - absolute raw-text retention for pending, retry, and in-flight processing rows;
 - full worker-path provider-return-after-TTL rejection with zero memory/receipt mutation;
 - uncached/raw dangerous-secret edit cancellation;
-- revoked-consent edit cancellation without receipt-text persistence;
+- unauthorized edit cancellation without receipt-text persistence;
 - out-of-order rapid edit versioning where the newest edit wins;
 - strict proposal validation including claim subject/attribution pairs;
 - deterministic third-party-claim coercion to Gossip;
@@ -292,7 +292,7 @@ Regression coverage includes:
 - deterministic memory/receipt/entity creation;
 - source deletion handling;
 - atomic mutable authorization re-check at enqueue and before mutation;
-- consent/runtime/pause/home-guild/interaction eligibility under the temporary compatibility architecture;
+- profile/runtime/pause/home-guild/interaction eligibility;
 - ambient-mode non-activation;
 - strict provider schema + `store=False` request shape;
 - least-privilege Message Content intent configuration.

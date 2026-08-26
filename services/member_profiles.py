@@ -9,14 +9,16 @@ from services import coven_registry as registry
 from services.database import utc_now_iso
 from services.member_identity import (
     MemberIdentity,
-    MemberIdentityError,
     TrustedIdentityContext,
     normalize_discord_display_name,
 )
 
 MEMBER_IDENTITY_SCHEMA_VERSION = 8
+# Legacy schema values retained only until the dedicated destructive migration tranche.
+# They are historical/compatibility metadata and MUST NOT authorize memory or chat access.
 LEGACY_MEMORY_CONSENT_VERSION = "legacy-adult-memory-v1"
 CURRENT_MEMORY_CONSENT_VERSION = "2026-08-interaction-dm-cross-reveal-v2"
+NON_AUTHORITATIVE_MEMORY_MARKER = "deprecated-not-authority"
 
 
 class MemberIdentityProfileNotFound(LookupError):
@@ -32,6 +34,8 @@ class StoredMemberIdentity:
     discord_display_name: str
     preferred_name: str
     birth_date: str
+    # These two fields remain readable only because schema v8 still physically contains them.
+    # Runtime authorization must use profile existence/source scope, never these values.
     adult_memory_consent_at: str
     memory_consent_version: str
     created_at: str
@@ -52,6 +56,8 @@ class StoredMemberIdentity:
 
     @property
     def has_current_memory_consent(self) -> bool:
+        """Legacy metadata only; never use this property as an authorization gate."""
+
         return self.memory_consent_version == CURRENT_MEMORY_CONSENT_VERSION
 
 
@@ -85,6 +91,8 @@ def _column_names(connection: sqlite3.Connection, table: str) -> set[str]:
 
 
 def _migrate_legacy_memory_consent(connection: sqlite3.Connection) -> None:
+    """Keep legacy schema v7 readable until the later physical column-removal migration."""
+
     columns = _column_names(connection, "coven_member_identity_profiles")
     if "memory_consent_version" in columns:
         return
@@ -168,7 +176,7 @@ def profile_is_complete(
     guild_id: int,
     user_id: int,
 ) -> bool:
-    """Return whether the member has a persisted identity profile, regardless of consent version."""
+    """Return whether the member has a persisted identity profile."""
 
     return (
         get_member_identity(
@@ -181,19 +189,42 @@ def profile_is_complete(
     )
 
 
+def profile_is_memory_eligible(
+    connection: sqlite3.Connection,
+    *,
+    guild_id: int,
+    user_id: int,
+) -> bool:
+    """Return whether identity prerequisites exist for approved memory interactions.
+
+    This is intentionally profile-state based. Consent timestamps/versions left in schema v8
+    are non-authoritative compatibility data and do not grant or revoke runtime access.
+    """
+
+    return profile_is_complete(
+        connection,
+        guild_id=guild_id,
+        user_id=user_id,
+    )
+
+
 def profile_has_current_consent(
     connection: sqlite3.Connection,
     *,
     guild_id: int,
     user_id: int,
 ) -> bool:
-    profile = get_member_identity(
+    """Deprecated compatibility alias for old Phase-4 callers.
+
+    The old name survives temporarily so the reviewed extraction worker can remain mechanically
+    stable in this tranche. It no longer checks consent and delegates to profile eligibility.
+    """
+
+    return profile_is_memory_eligible(
         connection,
         guild_id=guild_id,
         user_id=user_id,
-        required=False,
     )
-    return profile is not None and profile.has_current_memory_consent
 
 
 def save_member_identity(
@@ -205,20 +236,20 @@ def save_member_identity(
     preferred_name: str,
     birth_date: str | date,
     today: date,
-    adult_memory_consent: bool,
     actor_user_id: int,
+    adult_memory_consent: bool | None = None,
     consent_at: str | None = None,
-    consent_version: str = CURRENT_MEMORY_CONSENT_VERSION,
+    consent_version: str | None = None,
 ) -> StoredMemberIdentity:
-    """Validate and persist identity plus an explicit versioned adult-memory consent."""
+    """Validate and persist the member's canonical private identity.
 
+    The consent arguments are accepted only as short-lived source-compatibility parameters while
+    schema v8 and older callers are being retired. Their values are ignored for authorization and
+    new profiles receive a non-authoritative marker in the obsolete NOT NULL columns.
+    """
+
+    del adult_memory_consent, consent_at, consent_version
     initialize_member_identity_schema(connection)
-    if not adult_memory_consent:
-        raise MemberIdentityError("adult memory consent is required to complete induction")
-
-    normalized_consent_version = consent_version.strip()
-    if not normalized_consent_version:
-        raise MemberIdentityError("consent_version cannot be empty")
 
     identity = MemberIdentity.create(
         discord_display_name=discord_display_name,
@@ -240,9 +271,6 @@ def save_member_identity(
         required=False,
     )
     timestamp = utc_now_iso()
-    consent_timestamp = (consent_at or timestamp).strip()
-    if not consent_timestamp:
-        raise MemberIdentityError("consent_at cannot be empty")
 
     connection.execute(
         """
@@ -273,8 +301,6 @@ def save_member_identity(
         ON CONFLICT (guild_id, user_id) DO UPDATE SET
             preferred_name = excluded.preferred_name,
             birth_date = excluded.birth_date,
-            adult_memory_consent_at = excluded.adult_memory_consent_at,
-            memory_consent_version = excluded.memory_consent_version,
             updated_at = excluded.updated_at
         """,
         (
@@ -282,8 +308,8 @@ def save_member_identity(
             int(user_id),
             identity.preferred_name,
             identity.birth_date.isoformat(),
-            consent_timestamp,
-            normalized_consent_version,
+            timestamp,
+            NON_AUTHORITATIVE_MEMORY_MARKER,
             timestamp,
             timestamp,
         ),
@@ -309,8 +335,6 @@ def save_member_identity(
             "preferred_name_changed": before is None
             or before.preferred_name != after.preferred_name,
             "birth_date_changed": before is None or before.birth_date != after.birth_date,
-            "adult_memory_consent_recorded": True,
-            "memory_consent_version": normalized_consent_version,
         },
     )
     return after
@@ -373,7 +397,7 @@ def get_trusted_identity_context(
     user_id: int,
     on_date: date,
 ) -> TrustedIdentityContext:
-    """Build the allow-listed identity context for an already-authorised chat request."""
+    """Build the allow-listed identity context for an already-authorized chat request."""
 
     stored = get_member_identity(
         connection,
@@ -382,6 +406,4 @@ def get_trusted_identity_context(
         required=True,
     )
     assert stored is not None
-    if not stored.has_current_memory_consent:
-        raise MemberIdentityError("member must accept the current adult memory disclosure")
     return stored.trusted_chat_context(on_date=on_date)
