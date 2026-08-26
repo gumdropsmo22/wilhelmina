@@ -37,6 +37,8 @@ The persistent ledger contains:
 
 `memory_extraction_jobs` is the durable transient-work queue for interaction-scoped automatic extraction. Its v11 ownership model includes claim tokens, leases, bounded retry, source versions, absolute raw-text TTL enforcement, and migration protection against legacy tokenless workers.
 
+Phase 5 adds no new persistent table. `services.memory_context` reads the current identity/Ledger state and returns an in-memory authorization-filtered context bundle for the later chat brain.
+
 ## Memory record
 
 Every memory is guild-scoped and attached to an existing Coven member/profile shell. Gossip about a non-member does not silently create an outsider profile.
@@ -99,6 +101,8 @@ Facts, inferences, impressions, and gossip remain distinguishable. Gossip is att
 
 These fields are deterministic local authorization metadata. OpenAI never overrides them.
 
+Phase 5 additionally fails closed if a malformed legacy/manually-edited `restricted/cross_member` row exists despite normal service validation.
+
 ### Importance
 
 `importance` is an integer from 0 through 100, default 50. It is a retrieval/ranking signal, not authorization, and never overrides reveal scope.
@@ -150,6 +154,8 @@ Unrelated memories in the same category coexist. Superseded ordinary records and
 
 Conflicting gossip on the same topic may coexist and is linked through `memory_contradictions`. Editing a gossip record's topic/category clears obsolete links before valid links are regenerated. Deleting either memory cascades the relationship.
 
+Phase 5 may expand a selected gossip memory with bounded contradiction partners, but every partner is independently rechecked for the current interlocutor before it can enter context.
+
 ## Entity index
 
 `memory_entities` provides deterministic local relationship/index data for retrieval.
@@ -171,13 +177,21 @@ Search supports deterministic filters for guild, reveal scope, optional subject 
 
 OpenAI is never asked which private rows it is allowed to retrieve.
 
-## Full-profile and future retrieval contract
+Phase 5 consumes the existing best-first FTS ordering rather than reinterpreting raw BM25 sign/magnitude, then combines that deterministic priority with explicit member-reference and importance signals after authorization.
 
-The current interlocutor's full permitted active profile remains core future chat context. FTS/entity retrieval supplements that profile with relevant cross-member memories, named/referenced members, contradiction partners, historical callbacks, and evidence budgeting.
+## Full-profile and Phase 5 retrieval contract
 
-Authorization is applied before any selected context is sent to the model.
+The current interlocutor's full permitted active profile is core chat context. Phase 5 loads that profile first: the speaker's own `cross_member` and `owner_only` rows are eligible, while `admin_only`, invalid `restricted/cross_member`, and legacy hard-secret rows are excluded.
 
-Phase 5 will implement deterministic context intelligence on top of these interfaces. A distinct permanent/evolving psychological/personality-profiling layer remains externally policy-gated and is not smuggled into ordinary retrieval architecture.
+FTS/entity retrieval supplements the speaker profile with relevant **other-member `cross_member`** memories, named/referenced members, contradiction partners, historical callbacks, and bounded evidence receipts.
+
+Authorization is applied before relevance ranking. A high-importance or highly relevant hidden row therefore cannot outrank its way into context.
+
+Explicit member-reference IDs are a trusted service input intended for later Discord-resolved mentions/references. They are not a model-controlled authorization mechanism.
+
+A distinct permanent/evolving psychological/personality-profiling layer remains externally policy-gated and is not smuggled into ordinary retrieval architecture. Phase 5 may retrieve existing `Inference` and `Impression` memories while preserving those qualified epistemic labels; it does not create a new analyzed personality dossier.
+
+See `docs/memory_context.md` for the complete Phase-5 contract.
 
 ## Dangerous-secret boundary
 
@@ -192,7 +206,11 @@ The deterministic local guard instead rejects concrete dangerous-secret classes,
 - doxxing-grade exact private addresses;
 - equivalent high-risk secrets.
 
-The guard runs before provider use and again on model-controlled persisted strings such as summary/topic/term entities. Admin-only information and unauthorized sources remain outside ordinary disclosure regardless of content category.
+The guard runs before provider use and again on model-controlled persisted strings such as summary/topic/term entities. Phase 5 also revalidates summaries and receipt excerpts at retrieval time so an unsafe legacy or manually modified row cannot bypass the modern ingestion guards and reappear in a future chat prompt.
+
+If a legacy memory summary fails the guard, that memory is excluded from context. If a summary is safe but a legacy receipt excerpt fails, the memory may remain while that unsafe evidence excerpt is omitted.
+
+Admin-only information and unauthorized sources remain outside ordinary disclosure regardless of content category.
 
 A DM sent directly to Wilhelmina is not rejected merely for being private. Third-party DMs Wilhelmina is not part of remain inaccessible.
 
@@ -269,6 +287,10 @@ Legacy tokenless `processing` rows are invalidated, transient text is erased, cl
 
 The private identity table is transactionally rebuilt without the obsolete consent columns while preserving preferred name, full birth date, guild/user identity, and original timestamps. A failed copy rolls back to the intact legacy table.
 
+### Phase 5 context layer
+
+Phase 5 has no database migration and persists no context cache/profile table. Rollback is application-only: do not wire/use the context service from the later chat brain, or deploy the previous application revision. Existing Ledger/identity/extraction data is unchanged.
+
 Do not “rollback” a migrated production database by merely deploying older code. Stop Wilhelmina and restore a matching database backup with the matching application revision, or deploy a forward fix that understands the current schemas.
 
 ## Integrity and tests
@@ -287,7 +309,18 @@ The regression suite additionally covers:
 - source deletion;
 - explicit-only privacy metadata mutation;
 - member-wide authored-evidence deletion;
-- content-free operational logging/auditing.
+- content-free operational logging/auditing;
+- complete permitted speaker-profile loading;
+- owner/admin reveal-scope isolation;
+- malformed `restricted/cross_member` fail-closed behavior;
+- authorization-before-ranking;
+- referenced-member/entity retrieval;
+- FTS ordering preservation;
+- contradiction expansion/filtering;
+- wrong-guild context isolation;
+- bounded evidence with latest-edit preference;
+- retrieval-time legacy hard-secret exclusion;
+- epistemic/gossip preservation.
 
 Repository quality gates:
 
@@ -296,11 +329,11 @@ ruff check .
 pytest
 ```
 
-## Next implementation stages
+## Current and next implementation stages
 
-### Phase 5 — Memory intelligence/context
+### Phase 5 — Memory intelligence/context — current work
 
-Deterministic authorization-first scoring, FTS/entity retrieval, active-speaker profile loading, cross-member selection, contradiction expansion, and evidence budgeting.
+Authorization-first scoring, full active-speaker profile loading, FTS/entity cross-member selection, contradiction expansion, evidence budgeting, retrieval-time hard-secret defense, and prompt-ready epistemic rendering are implemented in the current stacked Phase-5 branch and remain subject to exact-head CI/review before any merge.
 
 ### Phase 6 — Wilhelmina chat brain
 

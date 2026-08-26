@@ -28,6 +28,8 @@ cogs.fortune            /fortune
 cogs.broadcasts         /broadcast-admin ...
 ```
 
+Phase-5 context intelligence is currently a service-layer capability (`services.memory_context`), not a Discord cog or command. The later Phase-6 chat cog will consume it.
+
 Each optional feature has its own flag:
 
 ```env
@@ -245,6 +247,20 @@ Phase 4 uses schema-v11 queue ownership with per-claim tokens, absolute raw-text
 For upgrades from the earlier v10 extraction draft, stop/drain old workers before enabling v11. v11 invalidates leftover tokenless processing rows and installs database enforcement that prevents old-style tokenless claims from entering `processing`.
 
 See `docs/memory_extraction.md` for the full eligibility, privacy, queue, rollout, and rollback contract.
+
+## Phase 5 memory context intelligence
+
+`services.memory_context` assembles deterministic memory context for the later Phase-6 chat brain. It is not a new Discord command and has no separate environment flag because nothing invokes it from live chat yet.
+
+The current speaker receives their complete **permitted** active profile: `cross_member` and their own `owner_only` memories, but never `admin_only`. Relevant memories about other members are retrieved only from `cross_member` rows through local FTS and explicit member/entity links. Authorization happens before ranking, so importance, relevance, recency, or contradiction cannot widen a memory's reveal scope.
+
+Phase 5 also expands revealable contradiction partners, includes bounded receipt evidence, preserves `Fact`/`Inference`/`Impression`/unverified `Gossip`, and re-runs the deterministic hard-secret guard at retrieval time so a malformed or legacy credential-containing row cannot be resurrected into a future prompt.
+
+The service uses the speaker's trusted identity context, including current Discord display name, preferred name, full canonical birth date, and locally calculated age. The existing under-18 profile-completion behavior remains **PRODUCT DECISION PENDING** and Phase 5 does not expand it.
+
+This phase does **not** build the separately policy-gated permanent/evolving personality-analysis dossier, does not add ambient whole-server listening, does not create a new consent/version gate, does not call OpenAI, and does not persist a new context table.
+
+See `docs/memory_context.md` for the authorization matrix, ranking, contradiction, evidence, secret-hardening, rollback, and validation contract.
 
 ## Scheduled Daily Broadcasts
 
