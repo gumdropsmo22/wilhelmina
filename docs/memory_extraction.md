@@ -109,7 +109,9 @@ The queue stores source text only while work is outstanding. Completed, rejected
 
 Every transition into `processing` receives a cryptographically random `claim_token`. Completion, rejection, retry, and failure transitions require the exact job ID plus the exact current claim token. Content hash alone is not considered ownership.
 
-If a lease expires, its token is revoked before the job can be reclaimed. A stale provider response from claim A therefore cannot mutate or finish work after claim B owns the row.
+If a lease expires, its token is revoked before the job can be reclaimed. Claims below `MAX_ATTEMPTS` return to `retry`; an expired claim that has already reached `MAX_ATTEMPTS` becomes terminal `failed`, clears its raw source text, and cannot be reclaimed again. The ready-job selector also refuses rows whose attempt counter has already reached the cap. A slow provider call therefore cannot create an unbounded stale-lease retry loop until the raw-text TTL.
+
+A stale provider response from claim A cannot mutate or finish work after claim B owns the row.
 
 Fresh v11 databases also enforce `processing -> claim_token IS NOT NULL` at the table level. Migrated v10 databases install equivalent SQLite triggers so an older v10 worker cannot create a new tokenless processing claim during deployment overlap.
 
@@ -152,15 +154,21 @@ The model may return at most six candidates. Each candidate contains:
 
 - category;
 - epistemic label;
+- `claim_subject`, either `author` or `third_party`;
+- `claim_attribution`, either `self` or `author_report`;
 - summary;
 - stable topic key;
 - importance `0..100`;
 - confidence `0..100`;
 - bounded `member` or `term` entities.
 
+The two claim fields are not decorative model prose. Python accepts only the pairs `author/self` and `third_party/author_report`. Missing or contradictory attribution metadata makes the proposal invalid.
+
 Automatic extraction cannot create `Admin note` records.
 
-A `Gossip` category or label is normalized to both `Gossip`. Third-party claims therefore remain attached to the speaking member and unverified.
+Any candidate marked `third_party/author_report` is deterministically forced to both category `Gossip` and epistemic label `Gossip`, even if the model proposed `Fact`, `Inference`, or `Impression`. A model therefore cannot turn a third-party report into ordinary asserted memory by choosing a stronger label. The stored Memory Ledger subject remains the speaking member, preserving who supplied the report; Gossip remains attributed and unverified.
+
+A `Gossip` category or label is likewise normalized to both `Gossip`.
 
 Member entity IDs are accepted only when the source message explicitly mentioned those IDs. Python rejects invented member links.
 
@@ -211,8 +219,11 @@ The feature fails closed:
 - queued job loses consent/pause/runtime authorization before provider -> reject before provider;
 - authorization changes while provider is running -> reject before mutation;
 - provider outage after enqueue -> retry;
-- expired lease -> revoke claim token before retry/reclaim;
+- expired lease below the attempt cap -> revoke claim token before retry/reclaim;
+- expired lease at the attempt cap -> terminal failure and raw-text erasure;
 - unprocessed or in-flight raw source text older than one hour -> reject, erase text, revoke claim;
+- missing/invalid claim-subject attribution -> reject without mutation;
+- third-party report proposed with a stronger epistemic label -> force to attributed/unverified Gossip;
 - invalid structured proposal -> reject without mutation;
 - dangerous secret in model-controlled metadata -> reject without mutation;
 - conflicting ordinary same-topic candidates -> reject during preflight before mutation;
@@ -267,13 +278,15 @@ Regression coverage includes:
 - post-model summary/topic/entity dangerous-secret rejection;
 - idempotent enqueue/edit requeue;
 - exact claim-token ownership across lease expiry/reclaim;
+- stale-lease attempt-cap terminalization with raw-text erasure;
 - bounded retries and terminal text clearing;
 - absolute raw-text retention for pending, retry, and in-flight processing rows;
 - full worker-path provider-return-after-TTL rejection with zero memory/receipt mutation;
 - uncached/raw dangerous-secret edit cancellation;
 - revoked-consent edit cancellation without receipt-text persistence;
 - out-of-order rapid edit versioning where the newest edit wins;
-- strict proposal validation;
+- strict proposal validation including claim subject/attribution pairs;
+- deterministic third-party-claim coercion to Gossip;
 - preflight same-topic conflict rejection before mutation;
 - gossip normalization and confidence threshold;
 - deterministic memory/receipt/entity creation;
