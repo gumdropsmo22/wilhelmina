@@ -66,11 +66,7 @@ def _parse_user_id(value: str) -> int:
 
 
 def _identity_state(identity) -> str:
-    if identity is None:
-        return "none"
-    if identity.has_current_memory_consent:
-        return "current consent"
-    return f"legacy consent ({identity.memory_consent_version})"
+    return "complete" if identity is not None else "none"
 
 
 def _memory_line(memory: memory_ledger.MemoryRecord) -> str:
@@ -323,7 +319,7 @@ class MemoryAdmin(commands.GroupCog, group_name="memory-admin"):
             "on other members' memories, and "
             f"**{result.evidence_orphan_memory_count_deleted}** additional memory record(s) "
             "deleted because no evidence remained. "
-            "Coven Registry and private identity/consent records were not changed.",
+            "Coven Registry and private identity records were not changed.",
             ephemeral=True,
         )
 
@@ -377,8 +373,8 @@ class MemoryAdmin(commands.GroupCog, group_name="memory-admin"):
             f"contradiction_errors= {integrity.bad_contradictions}\n"
             f"fts                 = {'ok' if integrity.fts_available else 'missing'}\n```\n"
             f"Designated Wilhelmina channel: {channel}\n"
-            "Automatic extraction itself remains a later phase; these controls are the "
-            "persistent local gate.",
+            "Automatic extraction is controlled independently by the runtime feature/policy "
+            "gates above; this command manages the persistent local gate.",
             ephemeral=True,
         )
 
@@ -509,15 +505,9 @@ class MemoryAdmin(commands.GroupCog, group_name="memory-admin"):
         embed.add_field(name="Discord user ID", value=f"`{user.id}`", inline=False)
         if identity is not None:
             trusted = identity.trusted_chat_context(on_date=date.today())
-            consent = (
-                "current"
-                if identity.has_current_memory_consent
-                else f"legacy: {identity.memory_consent_version}"
-            )
             embed.add_field(name="Preferred name", value=trusted.preferred_name, inline=True)
             embed.add_field(name="Birth date", value=trusted.birth_date, inline=True)
             embed.add_field(name="Age", value=str(trusted.age), inline=True)
-            embed.add_field(name="Memory consent", value=consent, inline=False)
         embed.set_footer(
             text=(
                 f"Page {current}/{pages} · {len(memories)} active memories · "
@@ -704,8 +694,8 @@ class MemoryAdmin(commands.GroupCog, group_name="memory-admin"):
             else ""
         )
         duplicate_note = (
-            " Duplicate confirmation merged its receipt; privacy/reveal metadata may tighten "
-            "but never loosens."
+            " Duplicate confirmation merged its receipt; existing privacy/reveal/importance "
+            "metadata was not changed. Use `/memory-admin edit` to change metadata explicitly."
             if not result.created
             else ""
         )

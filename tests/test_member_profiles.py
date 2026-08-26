@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import date
 
 import pytest
@@ -29,6 +30,15 @@ def _bootstrap(path, *, guild_id: int = 1) -> None:
         )
 
 
+def _profile_columns(connection) -> set[str]:
+    return {
+        str(row["name"])
+        for row in connection.execute(
+            "PRAGMA table_info(coven_member_identity_profiles)"
+        ).fetchall()
+    }
+
+
 def test_identity_persists_both_names_and_full_birth_date(tmp_path) -> None:
     path = tmp_path / "identity.sqlite3"
     _bootstrap(path)
@@ -54,8 +64,6 @@ def test_identity_persists_both_names_and_full_birth_date(tmp_path) -> None:
     assert stored.discord_display_name == "xXDarkSylveonXx"
     assert stored.preferred_name == "Jessica"
     assert stored.birth_date == "1991-10-31"
-    assert stored.memory_consent_version == member_profiles.NON_AUTHORITATIVE_MEMORY_MARKER
-    assert stored.has_current_memory_consent is False
     assert context.discord_display_name == "xXDarkSylveonXx"
     assert context.preferred_name == "Jessica"
     assert context.birth_date == "1991-10-31"
@@ -96,35 +104,6 @@ def test_identity_survives_a_new_database_connection(tmp_path) -> None:
     assert stored.preferred_name == "Real Name"
     assert stored.birth_date == "1990-01-01"
     assert eligible is True
-
-
-def test_legacy_consent_arguments_do_not_gate_identity(tmp_path) -> None:
-    path = tmp_path / "identity.sqlite3"
-    _bootstrap(path)
-
-    with managed_connection(path) as connection:
-        stored = member_profiles.save_member_identity(
-            connection,
-            guild_id=1,
-            user_id=300,
-            discord_display_name="Screen Name",
-            preferred_name="Real Name",
-            birth_date="1990-01-01",
-            today=date(2026, 8, 6),
-            adult_memory_consent=False,
-            consent_at="",
-            consent_version="",
-            actor_user_id=300,
-        )
-        context = member_profiles.get_trusted_identity_context(
-            connection,
-            guild_id=1,
-            user_id=300,
-            on_date=date(2026, 8, 6),
-        )
-
-    assert stored.memory_consent_version == member_profiles.NON_AUTHORITATIVE_MEMORY_MARKER
-    assert context.preferred_name == "Real Name"
 
 
 def test_underage_profile_does_not_change_registry_name(tmp_path) -> None:
@@ -215,7 +194,7 @@ def test_identity_is_scoped_to_one_guild(tmp_path) -> None:
     assert second is None
 
 
-def test_identity_audit_omits_names_birth_date_and_consent_metadata(tmp_path) -> None:
+def test_identity_audit_omits_names_and_birth_date(tmp_path) -> None:
     path = tmp_path / "identity.sqlite3"
     _bootstrap(path)
 
@@ -240,43 +219,33 @@ def test_identity_audit_omits_names_birth_date_and_consent_metadata(tmp_path) ->
     assert "consent" not in payload.lower()
 
 
-def test_identity_schema_version_and_legacy_columns_are_preserved_for_safe_migration(tmp_path) -> None:
+def test_identity_schema_v12_has_no_consent_columns(tmp_path) -> None:
     path = tmp_path / "identity.sqlite3"
     _bootstrap(path)
 
     with managed_connection(path) as connection:
         member_profiles.initialize_member_identity_schema(connection)
-
-    connection = connect(path)
-    try:
-        table = connection.execute(
-            """
-            SELECT name
-            FROM sqlite_master
-            WHERE type = 'table' AND name = 'coven_member_identity_profiles'
-            """
-        ).fetchone()
-        columns = {
-            str(row["name"])
-            for row in connection.execute(
-                "PRAGMA table_info(coven_member_identity_profiles)"
-            ).fetchall()
-        }
+        columns = _profile_columns(connection)
         versions = {
             int(row["version"])
             for row in connection.execute("SELECT version FROM schema_migrations").fetchall()
         }
-    finally:
-        connection.close()
 
-    assert table is not None
-    assert "adult_memory_consent_at" in columns
-    assert "memory_consent_version" in columns
+    assert columns == {
+        "guild_id",
+        "user_id",
+        "preferred_name",
+        "birth_date",
+        "created_at",
+        "updated_at",
+    }
+    assert "adult_memory_consent_at" not in columns
+    assert "memory_consent_version" not in columns
     assert member_profiles.MEMBER_IDENTITY_SCHEMA_VERSION in versions
 
 
-def test_legacy_identity_profile_migrates_without_remaining_an_authorization_gate(tmp_path) -> None:
-    path = tmp_path / "identity.sqlite3"
+def test_v7_identity_profile_migrates_to_v12_without_losing_identity(tmp_path) -> None:
+    path = tmp_path / "identity-v7.sqlite3"
     _bootstrap(path)
 
     with managed_connection(path) as connection:
@@ -320,18 +289,122 @@ def test_legacy_identity_profile_migrates_without_remaining_an_authorization_gat
             user_id=300,
             on_date=date(2026, 8, 6),
         )
+        columns = _profile_columns(connection)
 
-        assert stored is not None
-        assert stored.memory_consent_version == member_profiles.LEGACY_MEMORY_CONSENT_VERSION
-        assert stored.has_current_memory_consent is False
-        assert member_profiles.profile_is_memory_eligible(
+    assert stored is not None
+    assert stored.preferred_name == "Jessica"
+    assert stored.birth_date == "1991-10-31"
+    assert stored.created_at == "created"
+    assert stored.updated_at == "updated"
+    assert context.birth_date == "1991-10-31"
+    assert member_profiles.profile_is_memory_eligible(
+        connect(path), guild_id=1, user_id=300
+    ) is True
+    assert "adult_memory_consent_at" not in columns
+    assert "memory_consent_version" not in columns
+
+
+def test_v8_identity_profile_migrates_to_v12_and_drops_both_consent_columns(tmp_path) -> None:
+    path = tmp_path / "identity-v8.sqlite3"
+    _bootstrap(path)
+
+    with managed_connection(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE coven_member_identity_profiles (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                preferred_name TEXT NOT NULL,
+                birth_date TEXT NOT NULL,
+                adult_memory_consent_at TEXT NOT NULL,
+                memory_consent_version TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, user_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO coven_member_identity_profiles (
+                guild_id, user_id, preferred_name, birth_date,
+                adult_memory_consent_at, memory_consent_version, created_at, updated_at
+            )
+            VALUES (1, 300, 'Jessica', '1991-10-31', 'old-consent', 'v2', 'created', 'updated')
+            """
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (8, 'old')"
+        )
+
+        member_profiles.initialize_member_identity_schema(connection)
+        stored = member_profiles.get_member_identity(
             connection,
             guild_id=1,
             user_id=300,
-        ) is True
-        assert member_profiles.profile_has_current_consent(
-            connection,
-            guild_id=1,
-            user_id=300,
-        ) is True
-        assert context.birth_date == "1991-10-31"
+            required=True,
+        )
+        columns = _profile_columns(connection)
+
+    assert stored is not None
+    assert stored.preferred_name == "Jessica"
+    assert stored.birth_date == "1991-10-31"
+    assert stored.created_at == "created"
+    assert stored.updated_at == "updated"
+    assert "adult_memory_consent_at" not in columns
+    assert "memory_consent_version" not in columns
+
+
+def test_failed_v12_copy_rolls_back_to_intact_legacy_table(tmp_path) -> None:
+    path = tmp_path / "identity-bad-legacy.sqlite3"
+    _bootstrap(path)
+
+    with managed_connection(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE coven_member_identity_profiles (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                preferred_name TEXT NOT NULL,
+                birth_date TEXT NOT NULL,
+                adult_memory_consent_at TEXT NOT NULL,
+                memory_consent_version TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, user_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO coven_member_identity_profiles (
+                guild_id, user_id, preferred_name, birth_date,
+                adult_memory_consent_at, memory_consent_version, created_at, updated_at
+            )
+            VALUES (1, 300, '', '1991-10-31', 'old-consent', 'v2', 'created', 'updated')
+            """
+        )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        with managed_connection(path) as connection:
+            member_profiles.initialize_member_identity_schema(connection)
+
+    connection = connect(path)
+    try:
+        columns = _profile_columns(connection)
+        row = connection.execute(
+            "SELECT preferred_name, memory_consent_version FROM coven_member_identity_profiles"
+        ).fetchone()
+        legacy_temp_exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (member_profiles.LEGACY_IDENTITY_TABLE,),
+        ).fetchone()
+    finally:
+        connection.close()
+
+    assert row is not None
+    assert row["preferred_name"] == ""
+    assert row["memory_consent_version"] == "v2"
+    assert "adult_memory_consent_at" in columns
+    assert "memory_consent_version" in columns
+    assert legacy_temp_exists is None

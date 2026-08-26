@@ -5,12 +5,6 @@ from dataclasses import dataclass
 
 from services import audit_log, memory_ledger
 
-_REVEAL_SCOPE_RANK = {
-    "cross_member": 0,
-    "owner_only": 1,
-    "admin_only": 2,
-}
-
 
 @dataclass(frozen=True)
 class LedgerAdminSummary:
@@ -156,27 +150,6 @@ def summarize_member(
     )
 
 
-def _stricter_privacy(
-    *,
-    existing_privacy: str,
-    existing_scope: str,
-    requested_privacy: str,
-    requested_scope: str,
-) -> tuple[str, str]:
-    privacy = (
-        "restricted"
-        if "restricted" in {existing_privacy, requested_privacy}
-        else "ordinary"
-    )
-    scope = max(
-        (existing_scope, requested_scope),
-        key=lambda value: _REVEAL_SCOPE_RANK[value],
-    )
-    if privacy == "restricted" and scope == "cross_member":
-        scope = "owner_only"
-    return privacy, scope
-
-
 def add_admin_memory(
     connection: sqlite3.Connection,
     *,
@@ -191,7 +164,13 @@ def add_admin_memory(
     reveal_scope: str,
     importance: int,
 ) -> tuple[memory_ledger.MemoryWriteResult, memory_ledger.MemoryRecord]:
-    """Add/confirm an admin memory while allowing duplicate privacy to tighten, never loosen."""
+    """Add or confirm an admin memory without implicit metadata mutation.
+
+    Exact duplicates add evidence/confirmation only. Privacy, reveal scope, and importance
+    remain whatever is already stored. An administrator may change those fields explicitly
+    through `memory_ledger.update_memory`, which supports both tightening and loosening when
+    the requested privacy/scope pair is valid.
+    """
 
     result = memory_ledger.add_memory(
         connection,
@@ -207,26 +186,7 @@ def add_admin_memory(
         reveal_scope=reveal_scope,
         importance=importance,
     )
-    stored = result.memory
-    if not result.created:
-        tightened_privacy, tightened_scope = _stricter_privacy(
-            existing_privacy=stored.privacy_class,
-            existing_scope=stored.reveal_scope,
-            requested_privacy=privacy_class,
-            requested_scope=reveal_scope,
-        )
-        if (
-            tightened_privacy != stored.privacy_class
-            or tightened_scope != stored.reveal_scope
-        ):
-            stored = memory_ledger.update_memory(
-                connection,
-                memory_id=stored.id,
-                actor_user_id=actor_user_id,
-                privacy_class=tightened_privacy,
-                reveal_scope=tightened_scope,
-            )
-    return result, stored
+    return result, result.memory
 
 
 def delete_member_data(

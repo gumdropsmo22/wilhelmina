@@ -35,7 +35,7 @@ If any gate fails, private content does not enter OpenAI extraction.
 
 Mutable authorization is checked more than once. The event path re-checks home guild, runtime mode, persistent pause/resume state, member profile state, and interaction scope inside a SQLite `BEGIN IMMEDIATE` transaction immediately before queue persistence. A claimed job re-checks authorization immediately before the provider request and again inside a write transaction immediately before any Memory Ledger mutation.
 
-The old `profile_has_current_consent(...)` helper name remains only as a compatibility alias for the already-reviewed Phase-4 worker. It now delegates to profile-state eligibility and does **not** inspect `adult_memory_consent_at` or `memory_consent_version`. Those schema-v8 columns are non-authoritative compatibility data pending the later physical migration.
+Identity eligibility is explicit: `profile_is_memory_eligible(...)` currently means that the private identity profile exists. There is no adult-memory-consent flag, exact consent-version gate, or consent-named compatibility helper. Identity schema v12 physically removed the obsolete consent columns while preserving preferred names, full canonical birth dates, and identity timestamps.
 
 ## Eligible Discord text
 
@@ -273,6 +273,7 @@ Regression coverage includes:
 
 - schema v11 initialization and v10 -> v11 migration;
 - legacy tokenless processing-claim invalidation and old-style claim rejection;
+- identity schema v7/v8 -> v12 preservation and rollback safety;
 - permissiveness regressions for medical/mental-health/adult/socially sensitive subject matter;
 - pre-AI credential/private-ID/payment/address rejection;
 - post-model summary/topic/entity dangerous-secret rejection;

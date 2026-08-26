@@ -144,6 +144,8 @@ memory_extraction_jobs
 schema_migrations
 ```
 
+Private identity schema v12 stores preferred name, full canonical birth date, and timestamps; current Discord display name remains in the Coven Registry. The obsolete adult-memory-consent timestamp/version columns are physically removed. The existing under-18 profile-completion behavior remains unchanged and is a separate product decision.
+
 The stored guild configuration is the source of truth for server role/channel IDs after Phase 2. Environment variables for role/channel IDs are not used by the new config layer.
 
 ## Living Command Grimoire
@@ -210,11 +212,11 @@ Core commands:
 /memory-admin delete-member-id
 ```
 
-The persistent pause/resume switch is separate from `MEMORY_COLLECTION_MODE`. Resuming the local gate does not activate automatic extraction by itself. Search and inspection are local SQLite operations; Phase 3 does not call OpenAI and does not need an API key.
+The persistent pause/resume switch is separate from `MEMORY_COLLECTION_MODE`. Resuming the local gate does not activate automatic extraction by itself. Search and inspection are local SQLite operations and do not need an API key.
 
-Exact duplicate admin writes still merge receipts. Their privacy metadata may tighten but never loosen: a later restricted/admin-only confirmation can narrow an existing ordinary record, while a broader duplicate cannot reopen a record that is already narrower. The command reports the actual stored privacy/reveal scope and importance.
+Exact duplicate admin writes merge receipts/evidence only. They do **not** silently change privacy, reveal scope, or importance. Metadata changes require `/memory-admin edit`, which may explicitly tighten or loosen a valid privacy/reveal pair.
 
-Single-memory deletion requires the exact confirmation text `DELETE`. Member-wide Memory Ledger deletion requires `DELETE MEMBER`. The member-wide purge removes the member's own Memory Ledger records **and** receipts they authored on other members' memories. Any memory left with zero evidence is also deleted; memories that still have another receipt survive. The purge deliberately does **not** silently delete Coven Registry or private identity/consent rows.
+Single-memory deletion requires the exact confirmation text `DELETE`. Member-wide Memory Ledger deletion requires `DELETE MEMBER`. The member-wide purge removes the member's own Memory Ledger records **and** receipts they authored on other members' memories. Any memory left with zero evidence is also deleted; memories that still have another receipt survive. The purge deliberately does **not** silently delete Coven Registry or private identity rows.
 
 `member-data-id` and `delete-member-id` provide the same private controls for departed/archived users who are no longer selectable as `discord.Member`.
 
@@ -236,9 +238,9 @@ OPENAI_RETENTION_MODE=mam
 
 `zdr` may be used instead of `mam` when that approved project configuration is available. The environment value is only a deployment assertion; the corresponding retention control must actually be configured for the OpenAI project. Private extraction requests use `store=false`.
 
-Enabling extraction requests Discord's Message Content intent, which must also be enabled in the Discord Developer Portal. The persistent Memory Ledger collection gate must be resumed. The current exact-version adult-memory consent check remains only as temporary compatibility with the merged identity schema and is scheduled for removal in the separate post-Phase-4 identity/profile cleanup; it is not the long-term product contract.
+Enabling extraction requests Discord's Message Content intent, which must also be enabled in the Discord Developer Portal. The persistent Memory Ledger collection gate must be resumed, and the speaking member must have a completed private identity profile. There is no separate adult-memory-consent/version permission gate.
 
-Phase 4 uses schema v11 queue ownership with per-claim tokens, absolute raw-text TTL cleanup, atomic authorization before queue persistence, uncached/raw edit handling, and deterministic dangerous-secret rejection both before OpenAI and after structured model output. Medical, mental-health, adult relationship/sexual, political, religious, identity, substance-use, embarrassing, gossip, and other socially sensitive material is not blocked merely because of its subject category. SQLite/Python remain authoritative; the model cannot authorize access or mutate memory directly.
+Phase 4 uses schema-v11 queue ownership with per-claim tokens, absolute raw-text TTL cleanup, atomic authorization before queue persistence, uncached/raw edit handling, and deterministic dangerous-secret rejection both before OpenAI and after structured model output. Medical, mental-health, adult relationship/sexual, political, religious, identity, substance-use, embarrassing, gossip, and other socially sensitive material is not blocked merely because of its subject category. SQLite/Python remain authoritative; the model cannot authorize access or mutate memory directly.
 
 For upgrades from the earlier v10 extraction draft, stop/drain old workers before enabling v11. v11 invalidates leftover tokenless processing rows and installs database enforcement that prevents old-style tokenless claims from entering `processing`.
 
@@ -302,7 +304,7 @@ broadcast_morning    The Vanguard Frequency generation
 broadcast_evening    W.W.N. Broadcast generation
 ```
 
-This keeps Wilhelmina recognizable while allowing each feature to apply the right functional limits. The old umbrella oracle/persona architecture remains removed.
+This keeps Wilhelmina recognizable while allowing each feature to apply the right functional limits. Protected/identity traits may be mentioned factually when relevant; the persona boundary is against using the trait itself as the basis for dehumanizing or comparable targeted abuse.
 
 ## AI-backed features
 
