@@ -98,6 +98,8 @@ def _candidate(**overrides):
     value = {
         "category": "Preference",
         "epistemic_label": "Fact",
+        "claim_subject": "author",
+        "claim_attribution": "self",
         "summary": "Prefers tea",
         "topic_key": "drink.tea",
         "importance": 60,
