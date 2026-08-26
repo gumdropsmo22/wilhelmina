@@ -248,7 +248,63 @@ def local_chat_date(
     return instant.astimezone(zone).date()
 
 
+def _guild_visible_evidence_allowed(
+    connection: sqlite3.Connection,
+    *,
+    guild_id: int,
+    receipt_id: int,
+) -> bool:
+    """Authorize raw receipt evidence independently from its attached memory record.
+
+    A cross-member summary can be safe to use publicly while its raw source message is not.
+    Guild-visible prompts therefore use receipt text only when the receipt came from a guild
+    message and that exact Discord source is not also evidence for any non-cross-member,
+    restricted, or Admin-note memory. This prevents one multi-memory source message from
+    smuggling owner/admin-only text through a surviving public memory.
+    """
+
+    receipt = connection.execute(
+        """
+        SELECT id, guild_id, source_kind, source_context, message_id
+        FROM memory_receipts
+        WHERE id = ? AND guild_id = ?
+        """,
+        (int(receipt_id), int(guild_id)),
+    ).fetchone()
+    if receipt is None:
+        return False
+    if str(receipt["source_kind"]) != "discord" or str(receipt["source_context"]) != "guild":
+        return False
+    if receipt["message_id"] is None:
+        return False
+
+    hidden_sibling = connection.execute(
+        """
+        SELECT 1
+        FROM memory_receipts AS sibling
+        JOIN memory_records AS sibling_memory ON sibling_memory.id = sibling.memory_id
+        WHERE sibling.guild_id = ?
+          AND sibling.source_kind = 'discord'
+          AND sibling.source_context = ?
+          AND sibling.message_id = ?
+          AND (
+              sibling_memory.reveal_scope != 'cross_member'
+              OR sibling_memory.privacy_class = 'restricted'
+              OR sibling_memory.category = 'Admin note'
+          )
+        LIMIT 1
+        """,
+        (
+            int(guild_id),
+            str(receipt["source_context"]),
+            int(receipt["message_id"]),
+        ),
+    ).fetchone()
+    return hidden_sibling is None
+
+
 def _filter_bundle_for_audience(
+    connection: sqlite3.Connection,
     bundle: memory_context.MemoryContextBundle,
     *,
     audience_scope: AudienceScope,
@@ -279,11 +335,21 @@ def _filter_bundle_for_audience(
         item.memory.id for item in (*speaker_profile, *contextual_memories)
     }
 
-    def trim_contradictions(
-        item: memory_context.ContextMemory,
-    ) -> memory_context.ContextMemory:
+    def trim_item(item: memory_context.ContextMemory) -> memory_context.ContextMemory:
+        evidence = item.evidence
+        if audience_scope is AudienceScope.GUILD_VISIBLE:
+            evidence = tuple(
+                receipt
+                for receipt in evidence
+                if _guild_visible_evidence_allowed(
+                    connection,
+                    guild_id=bundle.guild_id,
+                    receipt_id=receipt.receipt_id,
+                )
+            )
         return replace(
             item,
+            evidence=evidence,
             contradicts_memory_ids=tuple(
                 memory_id
                 for memory_id in item.contradicts_memory_ids
@@ -293,10 +359,8 @@ def _filter_bundle_for_audience(
 
     return replace(
         bundle,
-        speaker_profile=tuple(trim_contradictions(item) for item in speaker_profile),
-        contextual_memories=tuple(
-            trim_contradictions(item) for item in contextual_memories
-        ),
+        speaker_profile=tuple(trim_item(item) for item in speaker_profile),
+        contextual_memories=tuple(trim_item(item) for item in contextual_memories),
     )
 
 
@@ -323,4 +387,8 @@ def assemble_chat_memory_context(
         on_date=resolved_date,
         referenced_member_ids=referenced_member_ids,
     )
-    return _filter_bundle_for_audience(bundle, audience_scope=route.audience_scope)
+    return _filter_bundle_for_audience(
+        connection,
+        bundle,
+        audience_scope=route.audience_scope,
+    )

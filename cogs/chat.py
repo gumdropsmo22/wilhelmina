@@ -6,7 +6,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
-from services import chat, memory_context, memory_ledger, member_profiles
+from services import chat, chat_response, memory_context, memory_ledger, member_profiles, persona
 from services.database import initialize_database, managed_connection
 
 logger = logging.getLogger("wilhelmina.chat.events")
@@ -41,10 +41,7 @@ def _message_envelope(message: discord.Message) -> chat.ChatMessageEnvelope:
 
 
 class Chat(commands.Cog):
-    """Phase-6A interaction routing and authorized context preparation.
-
-    This tranche intentionally performs no OpenAI call and sends no generated reply.
-    """
+    """Memory-aware direct-interaction chat for the approved Phase-6 surfaces."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -137,6 +134,58 @@ class Chat(commands.Cog):
             len(referenced_member_ids),
             len(bundle.speaker_profile),
             len(bundle.contextual_memories),
+        )
+
+        try:
+            reply = await chat_response.generate_chat_reply_async(
+                route=route,
+                bundle=bundle,
+                current_message=envelope.content,
+            )
+        except Exception as exc:
+            logger.warning(
+                "chat_generation_failed guild_id=%s message_id=%s author_user_id=%s exception=%s",
+                home_guild_id,
+                envelope.message_id,
+                envelope.author_user_id,
+                type(exc).__name__,
+            )
+            reply = chat_response.ChatReply(
+                text=persona.fallback_for("chat"),
+                provider_used=False,
+                fallback_reason="unexpected_generation_failure",
+            )
+
+        try:
+            await message.reply(
+                reply.text,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+                fail_if_not_exists=False,
+            )
+        except discord.HTTPException as exc:
+            logger.warning(
+                "chat_send_failed guild_id=%s message_id=%s author_user_id=%s exception=%s status=%s",
+                home_guild_id,
+                envelope.message_id,
+                envelope.author_user_id,
+                type(exc).__name__,
+                getattr(exc, "status", None),
+            )
+            return
+
+        logger.info(
+            "chat_reply_sent guild_id=%s message_id=%s author_user_id=%s surface=%s audience=%s "
+            "provider_used=%s model=%s request_id=%s fallback_reason=%s",
+            home_guild_id,
+            envelope.message_id,
+            envelope.author_user_id,
+            route.surface.value,
+            route.audience_scope.value,
+            reply.provider_used,
+            reply.model,
+            reply.request_id,
+            reply.fallback_reason,
         )
 
 
