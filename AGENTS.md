@@ -805,8 +805,8 @@ The current broad build sequence is:
 2. Memory architecture — completed.
 3. Memory administration — completed.
 4. Automatic memory extraction — **BUILT + TESTED + IN REVIEW** in the current stacked PR sequence; not merged.
-5. Context intelligence / retrieval — current work.
-6. Wilhelmina's memory-aware chat brain.
+5. Context intelligence / retrieval — **BUILT + TESTED + IN REVIEW** in the current stacked PR sequence; not merged.
+6. Wilhelmina's memory-aware chat brain — current work; Phase 6A builds the Discord routing and audience-aware context contract before provider-backed replies.
 7. Hardening, deployment, broader listening pathway, and final operational readiness.
 
 Additional work required before or alongside later phases includes:

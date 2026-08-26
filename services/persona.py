@@ -102,6 +102,12 @@ FEATURE_PROFILES: Mapping[str, FeatureProfile] = {
         fallback="Step inside. The house has already noticed you.",
         max_chars=500,
     ),
+    "chat": FeatureProfile(
+        key="chat",
+        label="Chat",
+        fallback="The machine has chosen incompetence. Try again.",
+        max_chars=1900,
+    ),
     "broadcast_morning": FeatureProfile(
         key="broadcast_morning",
         label="Morning broadcast",
