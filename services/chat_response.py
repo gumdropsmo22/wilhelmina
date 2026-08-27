@@ -53,8 +53,31 @@ class ChatReply:
     fallback_reason: str | None = None
 
 
+def _scan_chat_secret_material(value: str) -> str:
+    """Scan arbitrarily rich prompt context without applying the 4k extraction-input cap."""
+
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        raise ChatInputRejected("chat text cannot be empty")
+
+    for pattern in memory_ledger.BLOCKED_PATTERNS:
+        if pattern.search(cleaned):
+            raise ChatInputRejected("chat text contains prohibited secret material")
+    for pattern in memory_extraction.TOKEN_PATTERNS:
+        if pattern.search(cleaned):
+            raise ChatInputRejected("chat text contains prohibited secret material")
+    for match in re.finditer(r"(?:\d[ -]?){13,19}", cleaned):
+        digits = re.sub(r"\D", "", match.group(0))
+        if memory_extraction._luhn_valid(digits):
+            raise ChatInputRejected("chat text contains prohibited payment-card material")
+    for pattern in CHAT_SECRET_PATTERNS:
+        if pattern.search(cleaned):
+            raise ChatInputRejected("chat text contains recognizable credential material")
+    return cleaned
+
+
 def validate_chat_input(value: str) -> str:
-    """Reject concrete high-risk secrets before text reaches OpenAI."""
+    """Reject concrete high-risk secrets before current Discord text reaches OpenAI."""
 
     try:
         cleaned = memory_extraction.guard_extractable_text(value)
@@ -65,6 +88,12 @@ def validate_chat_input(value: str) -> str:
         if pattern.search(cleaned):
             raise ChatInputRejected("text contains recognizable credential material")
     return cleaned
+
+
+def validate_chat_context(value: str) -> str:
+    """Secret-scan authorized rendered context without imposing the extractor's 4k limit."""
+
+    return _scan_chat_secret_material(value)
 
 
 def _audience_rule(route: ChatRoute) -> str:
@@ -94,7 +123,7 @@ def build_chat_prompt(
     cleaned_message = validate_chat_input(current_message)
     profile = persona.get_feature_profile("chat")
     rendered_memory = memory_context.render_memory_context_for_prompt(bundle)
-    cleaned_memory = validate_chat_input(rendered_memory)
+    cleaned_memory = validate_chat_context(rendered_memory)
 
     return (
         f"BASE VOICE\n{persona.BASE_VOICE}\n\n"
