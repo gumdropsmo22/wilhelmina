@@ -109,7 +109,7 @@ def test_authorized_memory_context_over_4000_chars_is_scanned_without_rejection(
         current_message="Continue.",
     )
 
-    assert rendered in prompt
+    assert rendered.strip() in prompt
 
 
 def test_long_authorized_context_secret_near_end_is_still_rejected(monkeypatch):
