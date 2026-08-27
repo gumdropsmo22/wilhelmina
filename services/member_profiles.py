@@ -13,12 +13,8 @@ from services.member_identity import (
     normalize_discord_display_name,
 )
 
-MEMBER_IDENTITY_SCHEMA_VERSION = 8
-# Legacy schema values retained only until the dedicated destructive migration tranche.
-# They are historical/compatibility metadata and MUST NOT authorize memory or chat access.
-LEGACY_MEMORY_CONSENT_VERSION = "legacy-adult-memory-v1"
-CURRENT_MEMORY_CONSENT_VERSION = "2026-08-interaction-dm-cross-reveal-v2"
-NON_AUTHORITATIVE_MEMORY_MARKER = "deprecated-not-authority"
+MEMBER_IDENTITY_SCHEMA_VERSION = 12
+LEGACY_IDENTITY_TABLE = "coven_member_identity_profiles_pre_v12"
 
 
 class MemberIdentityProfileNotFound(LookupError):
@@ -34,10 +30,6 @@ class StoredMemberIdentity:
     discord_display_name: str
     preferred_name: str
     birth_date: str
-    # These two fields remain readable only because schema v8 still physically contains them.
-    # Runtime authorization must use profile existence/source scope, never these values.
-    adult_memory_consent_at: str
-    memory_consent_version: str
     created_at: str
     updated_at: str
 
@@ -54,64 +46,108 @@ class StoredMemberIdentity:
     def trusted_chat_context(self, *, on_date: date) -> TrustedIdentityContext:
         return self.to_domain(today=on_date).trusted_chat_context(on_date=on_date)
 
-    @property
-    def has_current_memory_consent(self) -> bool:
-        """Legacy metadata only; never use this property as an authorization gate."""
 
-        return self.memory_consent_version == CURRENT_MEMORY_CONSENT_VERSION
-
-
-SCHEMA_STATEMENTS: tuple[str, ...] = (
-    """
-    CREATE TABLE IF NOT EXISTS coven_member_identity_profiles (
-        guild_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        preferred_name TEXT NOT NULL CHECK (
-            length(trim(preferred_name)) BETWEEN 1 AND 80
-        ),
-        birth_date TEXT NOT NULL CHECK (birth_date GLOB '????-??-??'),
-        adult_memory_consent_at TEXT NOT NULL,
-        memory_consent_version TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY (guild_id, user_id),
-        FOREIGN KEY (guild_id, user_id)
-            REFERENCES coven_registry_entries (guild_id, user_id)
-            ON DELETE CASCADE
-    )
-    """,
+CREATE_IDENTITY_TABLE = """
+CREATE TABLE IF NOT EXISTS coven_member_identity_profiles (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    preferred_name TEXT NOT NULL CHECK (
+        length(trim(preferred_name)) BETWEEN 1 AND 80
+    ),
+    birth_date TEXT NOT NULL CHECK (birth_date GLOB '????-??-??'),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (guild_id, user_id),
+    FOREIGN KEY (guild_id, user_id)
+        REFERENCES coven_registry_entries (guild_id, user_id)
+        ON DELETE CASCADE
 )
+"""
+
+
+def _table_exists(connection: sqlite3.Connection, table: str) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table,),
+    ).fetchone()
+    return row is not None
 
 
 def _column_names(connection: sqlite3.Connection, table: str) -> set[str]:
+    if not _table_exists(connection, table):
+        return set()
     return {
         str(row["name"])
         for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
     }
 
 
-def _migrate_legacy_memory_consent(connection: sqlite3.Connection) -> None:
-    """Keep legacy schema v7 readable until the later physical column-removal migration."""
+def _migrate_identity_profile_v12(connection: sqlite3.Connection) -> None:
+    """Drop obsolete consent columns while preserving canonical identity data.
+
+    SQLite has no portable DROP COLUMN path for all supported deployments, so legacy
+    v7/v8 shapes are rebuilt in-place. The caller's transaction owns commit/rollback;
+    a failed copy therefore leaves the old table intact rather than half-migrated.
+    """
 
     columns = _column_names(connection, "coven_member_identity_profiles")
-    if "memory_consent_version" in columns:
+    if not columns:
+        connection.execute(CREATE_IDENTITY_TABLE)
         return
+
+    required_core = {
+        "guild_id",
+        "user_id",
+        "preferred_name",
+        "birth_date",
+        "created_at",
+        "updated_at",
+    }
+    missing = required_core - columns
+    if missing:
+        raise sqlite3.IntegrityError(
+            "identity profile migration cannot preserve required columns: "
+            + ", ".join(sorted(missing))
+        )
+
+    obsolete = {"adult_memory_consent_at", "memory_consent_version"}
+    if not (columns & obsolete):
+        return
+
+    connection.execute(f"DROP TABLE IF EXISTS {LEGACY_IDENTITY_TABLE}")
     connection.execute(
-        """
-        ALTER TABLE coven_member_identity_profiles
-        ADD COLUMN memory_consent_version TEXT NOT NULL
-        DEFAULT 'legacy-adult-memory-v1'
+        f"ALTER TABLE coven_member_identity_profiles RENAME TO {LEGACY_IDENTITY_TABLE}"
+    )
+    connection.execute(CREATE_IDENTITY_TABLE)
+    connection.execute(
+        f"""
+        INSERT INTO coven_member_identity_profiles (
+            guild_id,
+            user_id,
+            preferred_name,
+            birth_date,
+            created_at,
+            updated_at
+        )
+        SELECT
+            guild_id,
+            user_id,
+            preferred_name,
+            birth_date,
+            created_at,
+            updated_at
+        FROM {LEGACY_IDENTITY_TABLE}
         """
     )
+    connection.execute(f"DROP TABLE {LEGACY_IDENTITY_TABLE}")
 
 
 def initialize_member_identity_schema(connection: sqlite3.Connection) -> None:
     """Create and migrate the private member-identity table idempotently."""
 
     registry.initialize_registry_schema(connection)
-    for statement in SCHEMA_STATEMENTS:
-        connection.execute(statement)
-    _migrate_legacy_memory_consent(connection)
+    _migrate_identity_profile_v12(connection)
+    connection.execute(CREATE_IDENTITY_TABLE)
     connection.execute(
         """
         INSERT OR IGNORE INTO schema_migrations (version, applied_at)
@@ -128,8 +164,6 @@ def _row_to_identity(row: sqlite3.Row) -> StoredMemberIdentity:
         discord_display_name=str(row["display_name"]),
         preferred_name=str(row["preferred_name"]),
         birth_date=str(row["birth_date"]),
-        adult_memory_consent_at=str(row["adult_memory_consent_at"]),
-        memory_consent_version=str(row["memory_consent_version"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )
@@ -153,8 +187,6 @@ def get_member_identity(
             entry.display_name,
             profile.preferred_name,
             profile.birth_date,
-            profile.adult_memory_consent_at,
-            profile.memory_consent_version,
             profile.created_at,
             profile.updated_at
         FROM coven_member_identity_profiles AS profile
@@ -176,7 +208,7 @@ def profile_is_complete(
     guild_id: int,
     user_id: int,
 ) -> bool:
-    """Return whether the member has a persisted identity profile."""
+    """Return whether the member has a persisted private identity profile."""
 
     return (
         get_member_identity(
@@ -195,32 +227,9 @@ def profile_is_memory_eligible(
     guild_id: int,
     user_id: int,
 ) -> bool:
-    """Return whether identity prerequisites exist for approved memory interactions.
-
-    This is intentionally profile-state based. Consent timestamps/versions left in schema v8
-    are non-authoritative compatibility data and do not grant or revoke runtime access.
-    """
+    """Return whether identity prerequisites exist for approved memory interactions."""
 
     return profile_is_complete(
-        connection,
-        guild_id=guild_id,
-        user_id=user_id,
-    )
-
-
-def profile_has_current_consent(
-    connection: sqlite3.Connection,
-    *,
-    guild_id: int,
-    user_id: int,
-) -> bool:
-    """Deprecated compatibility alias for old Phase-4 callers.
-
-    The old name survives temporarily so the reviewed extraction worker can remain mechanically
-    stable in this tranche. It no longer checks consent and delegates to profile eligibility.
-    """
-
-    return profile_is_memory_eligible(
         connection,
         guild_id=guild_id,
         user_id=user_id,
@@ -237,20 +246,10 @@ def save_member_identity(
     birth_date: str | date,
     today: date,
     actor_user_id: int,
-    adult_memory_consent: bool | None = None,
-    consent_at: str | None = None,
-    consent_version: str | None = None,
 ) -> StoredMemberIdentity:
-    """Validate and persist the member's canonical private identity.
+    """Validate and persist the member's canonical private identity."""
 
-    The consent arguments are accepted only as short-lived source-compatibility parameters while
-    schema v8 and older callers are being retired. Their values are ignored for authorization and
-    new profiles receive a non-authoritative marker in the obsolete NOT NULL columns.
-    """
-
-    del adult_memory_consent, consent_at, consent_version
     initialize_member_identity_schema(connection)
-
     identity = MemberIdentity.create(
         discord_display_name=discord_display_name,
         preferred_name=preferred_name,
@@ -292,12 +291,10 @@ def save_member_identity(
             user_id,
             preferred_name,
             birth_date,
-            adult_memory_consent_at,
-            memory_consent_version,
             created_at,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT (guild_id, user_id) DO UPDATE SET
             preferred_name = excluded.preferred_name,
             birth_date = excluded.birth_date,
@@ -308,8 +305,6 @@ def save_member_identity(
             int(user_id),
             identity.preferred_name,
             identity.birth_date.isoformat(),
-            timestamp,
-            NON_AUTHORITATIVE_MEMORY_MARKER,
             timestamp,
             timestamp,
         ),

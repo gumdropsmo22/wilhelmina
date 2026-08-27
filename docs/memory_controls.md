@@ -1,6 +1,6 @@
 # Memory Ledger Controls
 
-Phase 3 adds the private founder/admin command surface for the Memory Ledger. The feature is implemented by `cogs.memory_admin` over the existing schema-v9 persistence APIs. It does not call OpenAI and does not require an API key.
+`cogs.memory_admin` provides the private founder/admin command surface for the Memory Ledger. It operates on local SQLite persistence APIs, does not call OpenAI, and does not require an API key.
 
 ## Authorization and privacy
 
@@ -18,24 +18,26 @@ Normal members do not receive a Memory Ledger browsing command. Public Registry 
 
 `/memory-admin status` reports the local persistent collection gate, deployment runtime collection policy, designated Wilhelmina channel, content-free record counts, and Memory Ledger integrity checks.
 
-`/memory-admin pause` and `/memory-admin resume` persist `memory_ledger_settings.collection_enabled`. Pausing does not delete existing memories. Resuming does not override `MEMORY_COLLECTION_MODE`; the persistent database gate and the deployment runtime policy remain independent checks.
+`/memory-admin pause` and `/memory-admin resume` persist `memory_ledger_settings.collection_enabled`. Pausing does not delete existing memories. Resuming does not override `MEMORY_COLLECTION_MODE`; the persistent database gate and deployment runtime policy remain independent checks.
 
-`/memory-admin set-channel` and `/memory-admin clear-channel` persist the designated memory-aware Wilhelmina server channel for later chat phases.
+`/memory-admin set-channel` and `/memory-admin clear-channel` persist the designated memory-aware Wilhelmina server channel.
 
 ## Private inspection
 
 The founder/admin surface supports:
 
-- `/memory-admin profile` — paginated full active member profile, including private identity context when available;
+- `/memory-admin profile` — paginated active member profile, including preferred name, full birth date, and calculated current age when the private identity profile exists;
 - `/memory-admin show` — one Memory Ledger record by ID;
 - `/memory-admin receipts` — paginated source evidence for a record;
 - `/memory-admin search` — local FTS search with deterministic reveal-scope filters;
 - `/memory-admin member-data` — content-free Memory Ledger inventory for a current member;
 - `/memory-admin member-data-id` — the same inventory for a departed/archived member by Discord user ID.
 
+The identity surface reports profile state as `complete` or `none`. There is no memory-consent state to inspect after identity schema v12.
+
 Member inventory includes both memories whose subject is that member and receipts authored by that member on somebody else's memory. Cross-subject authored receipts are counted separately so they are not silently missed or double-counted.
 
-Admin search may intentionally include every reveal scope. This does not change the normal chat retrieval defaults and does not make `admin_only` records socially revealable.
+Admin search may intentionally include every reveal scope. This does not change normal chat retrieval defaults and does not make `admin_only` records socially revealable.
 
 ## Manual mutation
 
@@ -53,11 +55,11 @@ Member-wide Memory Ledger deletion requires the exact confirmation text `DELETE 
 
 ### Duplicate admin writes
 
-Exact duplicates still merge receipts rather than creating another record. If the new admin write requests a narrower privacy posture, the stored duplicate is tightened deterministically. Privacy/reveal metadata may tighten but never loosen:
+Exact duplicates merge evidence/receipts rather than creating another record. A duplicate confirmation does **not** implicitly change privacy class, reveal scope, or importance, even if the new `/memory-admin add` invocation requests different metadata.
 
-- `ordinary/cross_member` can become `restricted/admin_only` when a later duplicate requires it;
-- an already restricted/admin-only duplicate cannot be reopened by a later broader duplicate;
-- duplicate `importance` remains the existing stored value unless explicitly changed through `/memory-admin edit`.
+Metadata changes require the explicit `/memory-admin edit` path. An authorized admin may tighten or loosen privacy/reveal metadata so long as the requested pair is valid under the deterministic Memory Ledger rules. For example, an ordinary `cross_member` record may be explicitly tightened to `restricted/admin_only`, and a record may later be explicitly reopened to `ordinary/cross_member` when the admin intends that change.
+
+This keeps evidence confirmation separate from policy mutation and prevents a duplicate write from silently changing how an existing memory may be revealed.
 
 The add command reports the actual stored privacy class, reveal scope, and importance after the write.
 
@@ -69,9 +71,9 @@ A member-wide purge removes:
 2. every receipt authored by that member on another subject's memory;
 3. any other subject's memory that is left with zero receipts after those authored receipts are removed.
 
-A cross-subject memory that still has another receipt survives. This preserves the Memory Ledger rule that every surviving memory has evidence while ensuring a member's authored receipt content is actually removed from the ledger.
+A cross-subject memory that still has another receipt survives. This preserves the rule that every surviving memory has evidence while ensuring a member's authored receipt content is actually removed from the ledger.
 
-`delete-member` and `delete-member-id` are intentionally scoped to the Memory Ledger. They do not silently delete Coven Registry or private identity/consent records; those stores have separate product semantics and must not be destroyed as a side effect of a Memory Ledger command.
+`delete-member` and `delete-member-id` are intentionally scoped to the Memory Ledger. They do not silently delete Coven Registry or private identity records; those stores have separate product semantics and must not be destroyed as a side effect of a Memory Ledger command.
 
 ## Data-access/correction/deletion handling
 
@@ -79,7 +81,7 @@ Member Memory Ledger requests are founder/admin mediated rather than exposed as 
 
 1. use `member-data` for a current member or `member-data-id` for an archived/departed member;
 2. use `profile`, `show`, `search`, and `receipts` for private access review;
-3. use `edit` for Memory Ledger corrections;
+3. use `edit` for Memory Ledger corrections and explicit metadata policy changes;
 4. use `delete`, `delete-member`, or `delete-member-id` for permanent Memory Ledger deletion when appropriate.
 
 The ID routes accept a positive decimal 64-bit Discord snowflake string so large Discord IDs are not forced through a lossy JSON-number boundary.
@@ -100,22 +102,23 @@ The cog is controlled by:
 ENABLE_MEMORY_ADMIN=true
 ```
 
-It defaults enabled because it is the private safety/control surface for the persistent Memory Ledger. Automatic extraction remains separately governed by the runtime memory policy and later implementation phases.
+It defaults enabled because it is the private safety/control surface for the persistent Memory Ledger. Automatic extraction is separately governed by `ENABLE_MEMORY_EXTRACTION`, the runtime memory policy, profile/source eligibility, the persistent pause gate, and the private provider configuration.
 
 ## Validation
 
-Phase-3 tests cover:
+Regression coverage includes:
 
 - founder/admin home-guild authorization;
 - ephemeral denial behavior;
 - archived/departed member ID validation;
 - content-free status/member summaries;
 - restricted/admin-only counting;
-- duplicate privacy tightening and no-loosening;
+- duplicate confirmation leaving privacy/reveal/importance unchanged;
+- explicit privacy tightening and loosening through the edit path;
 - cross-subject authored receipt inventory and purge;
 - preservation of a memory that still has another receipt;
 - deletion of a memory left with zero evidence;
-- Registry survival after Memory Ledger-only deletion;
+- Registry and private identity survival after Memory Ledger-only deletion;
 - content-free deletion audit metadata.
 
 The repository quality gates remain:
@@ -127,4 +130,4 @@ pytest
 
 ## Rollback
 
-Phase 3 adds no database schema migration. Rolling back the command surface means deploying the previous application revision or disabling `ENABLE_MEMORY_ADMIN`. Existing schema-v9 data and persistent Memory Ledger settings remain intact.
+The command surface itself can be disabled with `ENABLE_MEMORY_ADMIN=false`. Schema-v12 identity migration is a separate persistent migration: do not run older identity code against a migrated production database. For a true database rollback, stop Wilhelmina and restore the matching pre-v12 SQLite backup together with the prior application revision; otherwise deploy a forward fix that understands v12.

@@ -34,7 +34,7 @@ def database_path(tmp_path):
     return path
 
 
-def _grant_consent(path):
+def _create_profile(path):
     with managed_connection(path) as connection:
         member_profiles.save_member_identity(
             connection,
@@ -44,7 +44,6 @@ def _grant_consent(path):
             preferred_name="Founder",
             birth_date="1990-01-01",
             today=date(2026, 8, 13),
-            adult_memory_consent=True,
             actor_user_id=2,
         )
 
@@ -84,19 +83,19 @@ async def test_runtime_off_blocks_before_collection(database_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_current_consent_is_required(database_path, monkeypatch):
+async def test_completed_profile_is_required(database_path, monkeypatch):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
     result = await _cog(database_path)._eligibility(
         _message(mentions=(SimpleNamespace(id=999),))
     )
     assert result.eligible is False
-    assert result.reason == "consent_missing"
+    assert result.reason == "profile_missing"
 
 
 @pytest.mark.asyncio
-async def test_dm_with_current_consent_is_eligible(database_path, monkeypatch):
+async def test_dm_with_completed_profile_is_eligible(database_path, monkeypatch):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
-    _grant_consent(database_path)
+    _create_profile(database_path)
     result = await _cog(database_path)._eligibility(_message(guild_id=None))
     assert result.eligible is True
     assert result.guild_id == 100
@@ -106,7 +105,7 @@ async def test_dm_with_current_consent_is_eligible(database_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_designated_channel_is_explicit_wilhelmina_interaction(database_path, monkeypatch):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
-    _grant_consent(database_path)
+    _create_profile(database_path)
     with managed_connection(database_path) as connection:
         memory_ledger.set_wilhelmina_channel(
             connection,
@@ -122,7 +121,7 @@ async def test_designated_channel_is_explicit_wilhelmina_interaction(database_pa
 @pytest.mark.asyncio
 async def test_mention_is_eligible_outside_designated_channel(database_path, monkeypatch):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
-    _grant_consent(database_path)
+    _create_profile(database_path)
     result = await _cog(database_path)._eligibility(
         _message(channel_id=20, mentions=(SimpleNamespace(id=999),))
     )
@@ -134,7 +133,7 @@ async def test_unaddressed_guild_message_is_not_ambient_collection(database_path
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "ambient")
     monkeypatch.setenv("ENABLE_AMBIENT_MEMORY", "true")
     monkeypatch.setenv("AMBIENT_MEMORY_APPROVAL_REFERENCE", "future-reference")
-    _grant_consent(database_path)
+    _create_profile(database_path)
     result = await _cog(database_path)._eligibility(_message(channel_id=20))
     assert result.eligible is False
     assert result.reason == "not_interaction"
@@ -143,7 +142,7 @@ async def test_unaddressed_guild_message_is_not_ambient_collection(database_path
 @pytest.mark.asyncio
 async def test_persistent_pause_blocks_collection(database_path, monkeypatch):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
-    _grant_consent(database_path)
+    _create_profile(database_path)
     with managed_connection(database_path) as connection:
         memory_ledger.set_collection_enabled(
             connection,
@@ -161,7 +160,7 @@ async def test_persistent_pause_blocks_collection(database_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_bot_and_wrong_guild_are_rejected(database_path, monkeypatch):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
-    _grant_consent(database_path)
+    _create_profile(database_path)
     bot_message = await _cog(database_path)._eligibility(_message(author_bot=True))
     wrong_guild = await _cog(database_path)._eligibility(
         _message(guild_id=101, mentions=(SimpleNamespace(id=999),))
@@ -173,7 +172,7 @@ async def test_bot_and_wrong_guild_are_rejected(database_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_enqueue_rechecks_pause_in_same_write_transaction(database_path, monkeypatch):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
-    _grant_consent(database_path)
+    _create_profile(database_path)
     with managed_connection(database_path) as connection:
         memory_extraction.initialize_extraction_schema(connection)
     cog = _cog(database_path)
@@ -203,7 +202,7 @@ async def test_enqueue_rechecks_pause_in_same_write_transaction(database_path, m
 @pytest.mark.asyncio
 async def test_uncached_secret_raw_edit_cancels_old_queue(database_path, monkeypatch):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
-    _grant_consent(database_path)
+    _create_profile(database_path)
     with managed_connection(database_path) as connection:
         memory_extraction.initialize_extraction_schema(connection)
         queued = memory_extraction.enqueue_message(
@@ -244,7 +243,7 @@ async def test_worker_discards_provider_result_that_crosses_absolute_ttl(
     monkeypatch,
 ):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
-    _grant_consent(database_path)
+    _create_profile(database_path)
     monkeypatch.setattr(memory_extraction_provider, "provider_ready", lambda: True)
     monkeypatch.setattr(
         memory_extraction_retention,

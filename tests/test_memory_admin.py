@@ -104,7 +104,9 @@ def test_member_summary_counts_private_rows_without_returning_content(database_p
     assert summary.admin_only_count == 1
 
 
-def test_admin_duplicate_can_tighten_privacy_but_never_loosen_it(database_path):
+def test_duplicate_confirmation_never_mutates_privacy_and_explicit_edit_can_move_both_ways(
+    database_path,
+):
     with managed_connection(database_path) as connection:
         first_result, first_stored = memory_admin.add_admin_memory(
             connection,
@@ -123,7 +125,7 @@ def test_admin_duplicate_can_tighten_privacy_but_never_loosen_it(database_path):
         assert first_stored.privacy_class == "ordinary"
         assert first_stored.reveal_scope == "cross_member"
 
-        tightened_result, tightened = memory_admin.add_admin_memory(
+        duplicate_result, unchanged = memory_admin.add_admin_memory(
             connection,
             guild_id=100,
             subject_user_id=2,
@@ -136,13 +138,23 @@ def test_admin_duplicate_can_tighten_privacy_but_never_loosen_it(database_path):
             reveal_scope="admin_only",
             importance=90,
         )
-        assert tightened_result.created is False
-        assert tightened.id == first_stored.id
+        assert duplicate_result.created is False
+        assert unchanged.id == first_stored.id
+        assert unchanged.privacy_class == "ordinary"
+        assert unchanged.reveal_scope == "cross_member"
+        assert unchanged.importance == 50
+
+        tightened = memory_ledger.update_memory(
+            connection,
+            memory_id=unchanged.id,
+            actor_user_id=2,
+            privacy_class="restricted",
+            reveal_scope="admin_only",
+        )
         assert tightened.privacy_class == "restricted"
         assert tightened.reveal_scope == "admin_only"
-        assert tightened.importance == 50
 
-        broader_result, still_tight = memory_admin.add_admin_memory(
+        second_duplicate, still_tight = memory_admin.add_admin_memory(
             connection,
             guild_id=100,
             subject_user_id=2,
@@ -155,11 +167,21 @@ def test_admin_duplicate_can_tighten_privacy_but_never_loosen_it(database_path):
             reveal_scope="cross_member",
             importance=10,
         )
-        assert broader_result.created is False
+        assert second_duplicate.created is False
         assert still_tight.privacy_class == "restricted"
         assert still_tight.reveal_scope == "admin_only"
         assert still_tight.importance == 50
-        assert len(memory_ledger.list_receipts(connection, still_tight.id)) == 3
+
+        loosened = memory_ledger.update_memory(
+            connection,
+            memory_id=still_tight.id,
+            actor_user_id=2,
+            privacy_class="ordinary",
+            reveal_scope="cross_member",
+        )
+        assert loosened.privacy_class == "ordinary"
+        assert loosened.reveal_scope == "cross_member"
+        assert len(memory_ledger.list_receipts(connection, loosened.id)) == 3
 
 
 def test_delete_member_memories_cascades_evidence_and_keeps_registry(database_path):

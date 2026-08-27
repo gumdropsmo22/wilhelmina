@@ -18,21 +18,21 @@ For an already-authorized Wilhelmina interaction, the trusted identity context c
 - full birth date;
 - current calculated age.
 
-This deliberately gives Wilhelmina enough context to use age, birthday timing, and the contrast between both names in her conversational persona. The full birth date is not reduced to age-only context because the product requires Wilhelmina herself to know the canonical birthday inside approved trusted context.
+This deliberately gives Wilhelmina enough context to use age, birthday timing, and the contrast between both names in her conversational persona. The full birth date is not reduced to age-only context because Wilhelmina herself needs the canonical birthday inside approved trusted context.
 
 The same information must not be copied into general-purpose commands, operational logs, public Registry cards, error messages, or unrelated AI features. Local code decides which member/profile and interaction are in scope before constructing the trusted identity object.
 
 ## Current under-18 behavior — PRODUCT DECISION PENDING
 
-The existing runtime behavior remains unchanged in this tranche: a birth date that calculates to under eighteen blocks completion of the identity profile. Future dates and malformed dates are rejected. February 29 birthdays use February 28 as the anniversary in non-leap years for age calculation.
+The existing runtime behavior remains unchanged: a birth date that calculates to under eighteen blocks completion of the identity profile. Future dates and malformed dates are rejected. February 29 birthdays use February 28 as the anniversary in non-leap years for age calculation.
 
-This behavior is intentionally preserved only to avoid changing an unresolved product decision while removing unrelated consent architecture.
+This is preserved only because the age rule is a separate unresolved product decision. The consent cleanup does not expand, remove, or reinterpret it.
 
 ## Identity profile and memory eligibility
 
-A completed private identity profile—not a separately versioned memory permission—is the identity prerequisite for approved interaction-scoped memory behavior.
+A completed private identity profile is the identity prerequisite for approved interaction-scoped memory behavior.
 
-`profile_is_complete(...)` means the private identity row exists. `profile_is_memory_eligible(...)` currently delegates to that profile state. Memory extraction still separately enforces its real runtime boundaries, including:
+`profile_is_complete(...)` means the private identity row exists. `profile_is_memory_eligible(...)` currently delegates to that profile state. Memory extraction separately enforces its actual runtime boundaries, including:
 
 - configured home guild;
 - interaction collection mode;
@@ -41,35 +41,40 @@ A completed private identity profile—not a separately versioned memory permiss
 - provider/privacy runtime readiness;
 - queue claim ownership and final mutation-time authorization.
 
-Profile existence is not a substitute for those controls. It simply replaces the agent-created `adult_memory_consent` / exact `memory_consent_version` gate.
+Profile existence is not a substitute for those controls. There is no separate adult-memory-consent permission, consent phrase, or exact disclosure-version gate.
 
-The old helper name `profile_has_current_consent(...)` remains temporarily as a compatibility alias for already-reviewed Phase-4 callers. It no longer checks a consent version and must not be treated as a permission API. The later cleanup/migration tranche should remove that compatibility name entirely.
+## Schema v12
 
-## Legacy consent columns are non-authoritative
+The private identity table now stores only canonical identity data and timestamps:
 
-Schema v8 still physically contains:
+- guild ID;
+- Discord user ID;
+- preferred name;
+- full birth date;
+- created timestamp;
+- updated timestamp.
 
-- `adult_memory_consent_at`;
-- `memory_consent_version`.
+Current Discord display name remains authoritative in the Coven Registry and is joined into the trusted identity object when loaded.
 
-They remain only so this runtime correction does not destructively rebuild the identity table before the dedicated migration tranche. Existing values are preserved as historical compatibility data. New profiles receive a non-authoritative compatibility marker in the obsolete version column because the current table still requires a non-null value.
+Schema v12 physically removes the obsolete `adult_memory_consent_at` and `memory_consent_version` columns. The old compatibility constants, save arguments, consent property, and `profile_has_current_consent(...)` alias are also removed.
 
-Neither field grants, revokes, upgrades, or downgrades memory/chat authorization.
+### v7/v8 migration
 
-The induction UI no longer asks a member to type `I CONSENT`, and identity completion no longer depends on a consent phrase or exact disclosure version.
+Legacy identity tables are rebuilt transactionally:
+
+1. verify the canonical identity columns needed for preservation;
+2. rename the legacy table inside the current SQLite transaction;
+3. create the v12 table;
+4. copy guild/user IDs, preferred name, full birth date, and original created/updated timestamps;
+5. drop the renamed legacy table;
+6. record schema version 12.
+
+If the copy violates the v12 table contract, the transaction rolls back. Tests cover both v7 and v8 source shapes plus a forced-copy failure to prove the legacy table/data are restored intact rather than left half-migrated.
 
 ## OpenAI boundary
 
 The model receives identity data only through an explicit allow-listed context assembled by trusted Python code. The model does not decide whose profile to load, whether a conversation/source is authorized, or how age is calculated.
 
-Private member-memory/chat calls use the shared asynchronous Responses API boundary with response storage forced off. Live private calls are designed to fail closed unless the deployment explicitly asserts an approved enhanced OpenAI retention posture (`mam` or `zdr`). Provider-side MAM/ZDR configuration remains an OpenAI-project setting; the runtime value is an assertion, not a substitute for actual approval/configuration.
+Private member-memory/chat calls use the shared asynchronous Responses API boundary with response storage forced off. Live private calls fail closed unless the deployment explicitly asserts an approved enhanced OpenAI retention posture (`mam` or `zdr`). Provider-side MAM/ZDR configuration remains an OpenAI-project setting; the runtime value is an assertion, not a substitute for actual approval/configuration.
 
 Prompts, responses, preferred names, and birth dates must not enter operational logs. Safe telemetry may include request ID, model, token usage, latency/status, and content-free identifiers.
-
-## Schema migration status
-
-The private member-identity schema remains version 8 during this tranche. No columns are dropped here.
-
-Existing version-7-style profiles still gain `memory_consent_version` so old databases remain readable, but that migrated value is no longer an authorization gate. Names and full birth dates remain intact.
-
-The next dedicated migration tranche may rebuild the table and physically remove obsolete consent columns after this runtime/UI change has proven stable.
