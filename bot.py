@@ -28,6 +28,8 @@ def build_intents(settings: RuntimeSettings) -> discord.Intents:
     intents = discord.Intents.default()
     if settings.is_cog_enabled("cogs.rules"):
         intents.members = True
+    if settings.is_cog_enabled("cogs.memory_extraction"):
+        intents.message_content = True
     return intents
 
 
