@@ -35,7 +35,7 @@ def database_path(tmp_path):
     return path
 
 
-def _grant_consent(path):
+def _save_profile(path):
     with managed_connection(path) as connection:
         member_profiles.save_member_identity(
             connection,
@@ -45,7 +45,6 @@ def _grant_consent(path):
             preferred_name="Founder",
             birth_date="1990-01-01",
             today=date(2026, 8, 16),
-            adult_memory_consent=True,
             actor_user_id=2,
         )
 
@@ -288,13 +287,20 @@ def test_v10_processing_claim_is_invalidated_and_old_style_reclaim_is_blocked(tm
             )
 
 
-def test_revoked_consent_edit_cancels_without_persisting_new_receipt_text(
+def test_legacy_consent_version_does_not_revoke_profile_or_safe_edit(
     database_path,
     monkeypatch,
 ):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
-    _grant_consent(database_path)
+    monkeypatch.setattr(memory_extraction_provider, "provider_ready", lambda: True)
+    _save_profile(database_path)
     with managed_connection(database_path) as connection:
+        memory_ledger.set_wilhelmina_channel(
+            connection,
+            guild_id=100,
+            channel_id=10,
+            actor_user_id=2,
+        )
         memory = _add_receipt_memory(connection)
         queued = _enqueue(connection, content="I prefer tea")
         connection.execute(
@@ -323,12 +329,20 @@ def test_revoked_consent_edit_cancels_without_persisting_new_receipt_text(
     with managed_connection(database_path) as connection:
         current = memory_extraction.get_job(connection, queued.id)
         receipt = memory_ledger.list_receipts(connection, memory.id)[0]
+        profile = member_profiles.get_member_identity(
+            connection,
+            guild_id=100,
+            user_id=2,
+            required=True,
+        )
+    assert profile is not None
+    assert profile.has_current_memory_consent is False
     assert current is not None
-    assert current.status == "rejected"
-    assert current.content is None
+    assert current.status == "pending"
+    assert current.content == "Actually I prefer coffee"
     assert current.source_edited_at == "2026-08-16T10:05:00+00:00"
-    assert receipt.edited_excerpt is None
-    assert receipt.source_edited_at is None
+    assert receipt.edited_excerpt == "Actually I prefer coffee"
+    assert receipt.source_edited_at == "2026-08-16T10:05:00+00:00"
 
 
 @pytest.mark.asyncio
@@ -338,7 +352,7 @@ async def test_newer_raw_edit_wins_when_older_handler_arrives_late(
 ):
     monkeypatch.setenv("MEMORY_COLLECTION_MODE", "interaction")
     monkeypatch.setattr(memory_extraction_provider, "provider_ready", lambda: True)
-    _grant_consent(database_path)
+    _save_profile(database_path)
     with managed_connection(database_path) as connection:
         memory_ledger.set_wilhelmina_channel(
             connection,

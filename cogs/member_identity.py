@@ -17,7 +17,6 @@ from services.database import initialize_database, managed_connection
 from services.member_identity import MemberIdentityError
 
 logger = logging.getLogger("wilhelmina.identity")
-CONSENT_PHRASE = "I CONSENT"
 STALE_COVENANT = "This covenant is outdated. Use `/rules` for the current one."
 
 
@@ -68,7 +67,7 @@ def _is_private_identity_admin(interaction: discord.Interaction, bot: commands.B
     return settings is not None and settings.founder_user_id == interaction.user.id
 
 
-class MemberInductionModal(discord.ui.Modal, title="Adult memory: DMs + callbacks"):
+class MemberInductionModal(discord.ui.Modal, title="Private member identity"):
     preferred_name = discord.ui.TextInput(
         label="What should Wilhelmina call you?",
         placeholder="The name you actually want used",
@@ -81,12 +80,6 @@ class MemberInductionModal(discord.ui.Modal, title="Adult memory: DMs + callback
         required=True,
         min_length=10,
         max_length=10,
-    )
-    consent = discord.ui.TextInput(
-        label="Type I CONSENT to memory + callbacks",
-        placeholder="DMs may be remembered; social memories may resurface with others",
-        required=True,
-        max_length=20,
     )
 
     def __init__(self, *, bot: commands.Bot, guild_id: int, rules_version_id: int) -> None:
@@ -118,11 +111,6 @@ class MemberInductionModal(discord.ui.Modal, title="Adult memory: DMs + callback
                     await interaction.followup.send(STALE_COVENANT, ephemeral=True)
                     return
 
-                if str(self.consent.value).strip().upper() != CONSENT_PHRASE:
-                    raise MemberIdentityError(
-                        f"Type {CONSENT_PHRASE} exactly to confirm the adult memory experience."
-                    )
-
                 _ensure_registry_entry(connection, interaction.user)
                 member_profiles.save_member_identity(
                     connection,
@@ -132,7 +120,6 @@ class MemberInductionModal(discord.ui.Modal, title="Adult memory: DMs + callback
                     preferred_name=str(self.preferred_name.value),
                     birth_date=str(self.birth_date.value),
                     today=_guild_today(connection, self.guild_id),
-                    adult_memory_consent=True,
                     actor_user_id=interaction.user.id,
                 )
                 acceptance = rules_service.accept_rules_version(
@@ -159,16 +146,9 @@ class MemberInductionModal(discord.ui.Modal, title="Adult memory: DMs + callback
             return
 
         if acceptance.already_accepted:
-            message = (
-                "Your profile and current memory consent are recorded; "
-                "that covenant was already accepted."
-            )
+            message = "Your private identity profile is recorded; that covenant was already accepted."
         else:
-            message = (
-                "Induction complete. I have both names and your full birthday. "
-                "Messages you send Wilhelmina, including DMs, may be remembered, "
-                "and ordinary social memories may resurface in her approved chats."
-            )
+            message = "Induction complete. I have both names and your full birthday."
         await interaction.followup.send(message, ephemeral=True)
 
 
@@ -179,7 +159,7 @@ async def begin_covenant_acceptance(
     guild_id: int,
     rules_version_id: int,
 ) -> None:
-    """Accept directly only when the current adult-memory disclosure is on file."""
+    """Accept directly when the private identity profile already exists."""
 
     initialize_database(_database_path(bot))
     with managed_connection(_database_path(bot)) as connection:
@@ -193,7 +173,7 @@ async def begin_covenant_acceptance(
             user_id=interaction.user.id,
             required=False,
         )
-        if profile is not None and profile.has_current_memory_consent:
+        if profile is not None:
             result = rules_service.accept_rules_version(
                 connection,
                 guild_id=int(guild_id),
@@ -299,8 +279,6 @@ class MemberIdentityAdmin(commands.GroupCog, group_name="identity-admin"):
             f"preferred    = {context.preferred_name}\n"
             f"birth_date   = {context.birth_date}\n"
             f"age          = {context.age}\n"
-            f"consent_at   = {profile.adult_memory_consent_at}\n"
-            f"consent_ver  = {profile.memory_consent_version}\n"
             "```",
             ephemeral=True,
         )
