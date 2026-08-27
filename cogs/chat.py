@@ -6,7 +6,15 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
-from services import chat, chat_response, memory_context, memory_ledger, member_profiles, persona
+from services import (
+    chat,
+    chat_continuity,
+    chat_response,
+    memory_context,
+    memory_ledger,
+    member_profiles,
+    persona,
+)
 from services.database import initialize_database, managed_connection
 
 logger = logging.getLogger("wilhelmina.chat.events")
@@ -41,10 +49,11 @@ def _message_envelope(message: discord.Message) -> chat.ChatMessageEnvelope:
 
 
 class Chat(commands.Cog):
-    """Memory-aware direct-interaction chat for the approved Phase-6 surfaces."""
+    """Memory-aware direct-interaction chat with bounded local continuity."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.runtime = chat_continuity.ChatContinuityRuntime()
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -78,6 +87,15 @@ class Chat(commands.Cog):
                 if not route.eligible:
                     return
 
+                if not self.runtime.claim_message(envelope.message_id):
+                    logger.info(
+                        "chat_duplicate_skipped guild_id=%s message_id=%s author_user_id=%s",
+                        home_guild_id,
+                        envelope.message_id,
+                        envelope.author_user_id,
+                    )
+                    return
+
                 referenced_member_ids = chat.resolve_referenced_member_ids(
                     connection,
                     guild_id=home_guild_id,
@@ -95,6 +113,7 @@ class Chat(commands.Cog):
                     referenced_member_ids=referenced_member_ids,
                 )
         except member_profiles.MemberIdentityProfileNotFound:
+            self.runtime.release_message(envelope.message_id)
             logger.info(
                 "chat_routing_skipped reason=profile_missing guild_id=%s message_id=%s author_user_id=%s",
                 home_guild_id,
@@ -103,6 +122,7 @@ class Chat(commands.Cog):
             )
             return
         except (chat.ChatContractError, memory_context.MemoryContextError):
+            self.runtime.release_message(envelope.message_id)
             logger.warning(
                 "chat_routing_skipped reason=context_contract guild_id=%s message_id=%s "
                 "author_user_id=%s",
@@ -112,6 +132,7 @@ class Chat(commands.Cog):
             )
             return
         except Exception as exc:
+            self.runtime.release_message(envelope.message_id)
             logger.warning(
                 "chat_routing_failed guild_id=%s message_id=%s author_user_id=%s exception=%s",
                 home_guild_id,
@@ -123,70 +144,146 @@ class Chat(commands.Cog):
 
         assert route.surface is not None
         assert route.audience_scope is not None
-        logger.info(
-            "chat_context_prepared guild_id=%s message_id=%s author_user_id=%s surface=%s "
-            "audience=%s referenced_count=%s speaker_memory_count=%s contextual_memory_count=%s",
-            home_guild_id,
-            envelope.message_id,
-            envelope.author_user_id,
-            route.surface.value,
-            route.audience_scope.value,
-            len(referenced_member_ids),
-            len(bundle.speaker_profile),
-            len(bundle.contextual_memories),
-        )
+        key = self.runtime.conversation_key(route=route, envelope=envelope)
 
-        try:
-            reply = await chat_response.generate_chat_reply_async(
-                route=route,
-                bundle=bundle,
-                current_message=envelope.content,
-            )
-        except Exception as exc:
-            logger.warning(
-                "chat_generation_failed guild_id=%s message_id=%s author_user_id=%s exception=%s",
+        async with self.runtime.lock_for(key):
+            history_text = self.runtime.render_history(key)
+            logger.info(
+                "chat_context_prepared guild_id=%s message_id=%s author_user_id=%s surface=%s "
+                "audience=%s referenced_count=%s speaker_memory_count=%s contextual_memory_count=%s "
+                "history_entry_count=%s",
                 home_guild_id,
                 envelope.message_id,
                 envelope.author_user_id,
-                type(exc).__name__,
-            )
-            reply = chat_response.ChatReply(
-                text=persona.fallback_for("chat"),
-                provider_used=False,
-                fallback_reason="unexpected_generation_failure",
+                route.surface.value,
+                route.audience_scope.value,
+                len(referenced_member_ids),
+                len(bundle.speaker_profile),
+                len(bundle.contextual_memories),
+                len(self.runtime.history(key)),
             )
 
-        try:
-            await message.reply(
-                reply.text,
-                mention_author=False,
-                allowed_mentions=discord.AllowedMentions.none(),
-                fail_if_not_exists=False,
-            )
-        except discord.HTTPException as exc:
-            logger.warning(
-                "chat_send_failed guild_id=%s message_id=%s author_user_id=%s exception=%s status=%s",
+            try:
+                async with self.runtime.generation_semaphore:
+                    reply = await chat_response.generate_chat_reply_async(
+                        route=route,
+                        bundle=bundle,
+                        current_message=envelope.content,
+                        history_text=history_text,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "chat_generation_failed guild_id=%s message_id=%s author_user_id=%s exception=%s",
+                    home_guild_id,
+                    envelope.message_id,
+                    envelope.author_user_id,
+                    type(exc).__name__,
+                )
+                reply = chat_response.ChatReply(
+                    text=persona.fallback_for("chat"),
+                    provider_used=False,
+                    fallback_reason="unexpected_generation_failure",
+                )
+
+            try:
+                await message.reply(
+                    reply.text,
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    fail_if_not_exists=False,
+                )
+            except discord.HTTPException as exc:
+                self.runtime.release_message(envelope.message_id)
+                logger.warning(
+                    "chat_send_failed guild_id=%s message_id=%s author_user_id=%s exception=%s status=%s",
+                    home_guild_id,
+                    envelope.message_id,
+                    envelope.author_user_id,
+                    type(exc).__name__,
+                    getattr(exc, "status", None),
+                )
+                return
+
+            if reply.provider_used:
+                try:
+                    safe_user_text = chat_response.validate_chat_input(envelope.content)
+                    safe_assistant_text = chat_response.validate_chat_input(reply.text)
+                except chat_response.ChatInputRejected:
+                    logger.warning(
+                        "chat_history_skipped reason=secret_guard guild_id=%s message_id=%s "
+                        "author_user_id=%s",
+                        home_guild_id,
+                        envelope.message_id,
+                        envelope.author_user_id,
+                    )
+                else:
+                    self.runtime.record_exchange(
+                        key,
+                        source_message_id=envelope.message_id,
+                        author_user_id=envelope.author_user_id,
+                        user_text=safe_user_text,
+                        assistant_text=safe_assistant_text,
+                    )
+
+            self.runtime.complete_message(envelope.message_id)
+            logger.info(
+                "chat_reply_sent guild_id=%s message_id=%s author_user_id=%s surface=%s audience=%s "
+                "provider_used=%s model=%s request_id=%s fallback_reason=%s history_entry_count=%s",
                 home_guild_id,
                 envelope.message_id,
                 envelope.author_user_id,
-                type(exc).__name__,
-                getattr(exc, "status", None),
+                route.surface.value,
+                route.audience_scope.value,
+                reply.provider_used,
+                reply.model,
+                reply.request_id,
+                reply.fallback_reason,
+                len(self.runtime.history(key)),
             )
+
+    @commands.Cog.listener()
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
+        home_guild_id = getattr(self.bot.settings, "home_guild_id", None)
+        if home_guild_id is None:
             return
+        if payload.guild_id is not None and int(payload.guild_id) != int(home_guild_id):
+            return
+        removed = self.runtime.remove_source_message(int(payload.message_id))
+        if removed:
+            logger.info(
+                "chat_history_source_deleted guild_id=%s message_id=%s removed_entries=%s",
+                home_guild_id,
+                payload.message_id,
+                removed,
+            )
 
-        logger.info(
-            "chat_reply_sent guild_id=%s message_id=%s author_user_id=%s surface=%s audience=%s "
-            "provider_used=%s model=%s request_id=%s fallback_reason=%s",
-            home_guild_id,
-            envelope.message_id,
-            envelope.author_user_id,
-            route.surface.value,
-            route.audience_scope.value,
-            reply.provider_used,
-            reply.model,
-            reply.request_id,
-            reply.fallback_reason,
-        )
+    @commands.Cog.listener()
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
+        home_guild_id = getattr(self.bot.settings, "home_guild_id", None)
+        if home_guild_id is None:
+            return
+        if payload.guild_id is not None and int(payload.guild_id) != int(home_guild_id):
+            return
+        content = payload.data.get("content")
+        if content is None:
+            return
+        try:
+            cleaned = chat_response.validate_chat_input(str(content))
+        except chat_response.ChatInputRejected:
+            removed = self.runtime.remove_source_message(int(payload.message_id))
+            if removed:
+                logger.info(
+                    "chat_history_source_edit_removed reason=secret_guard guild_id=%s message_id=%s",
+                    home_guild_id,
+                    payload.message_id,
+                )
+            return
+        if self.runtime.replace_member_message(int(payload.message_id), cleaned):
+            logger.info(
+                "chat_history_source_edited guild_id=%s message_id=%s",
+                home_guild_id,
+                payload.message_id,
+            )
 
 
 async def setup(bot: commands.Bot) -> None:
