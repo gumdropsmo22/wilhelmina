@@ -248,7 +248,7 @@ def local_chat_date(
     return instant.astimezone(zone).date()
 
 
-def _guild_visible_evidence_allowed(
+def _cross_member_evidence_allowed(
     connection: sqlite3.Connection,
     *,
     guild_id: int,
@@ -256,11 +256,11 @@ def _guild_visible_evidence_allowed(
 ) -> bool:
     """Authorize raw receipt evidence independently from its attached memory record.
 
-    A cross-member summary can be safe to use publicly while its raw source message is not.
-    Guild-visible prompts therefore use receipt text only when the receipt came from a guild
-    message and that exact Discord source is not also evidence for any non-cross-member,
-    restricted, or Admin-note memory. This prevents one multi-memory source message from
-    smuggling owner/admin-only text through a surviving public memory.
+    A cross-member summary can be safe to reveal while its raw source message is not. Raw
+    evidence therefore crosses a member boundary only when it came from a guild-visible Discord
+    message and that exact source is not also evidence for any non-cross-member, restricted, or
+    Admin-note memory. The same rule protects guild-visible replies and a private DM that retrieves
+    another member's cross-member summary.
     """
 
     receipt = connection.execute(
@@ -335,13 +335,18 @@ def _filter_bundle_for_audience(
         item.memory.id for item in (*speaker_profile, *contextual_memories)
     }
 
-    def trim_item(item: memory_context.ContextMemory) -> memory_context.ContextMemory:
+    def trim_item(
+        item: memory_context.ContextMemory,
+        *,
+        belongs_to_interlocutor: bool,
+    ) -> memory_context.ContextMemory:
         evidence = item.evidence
-        if audience_scope is AudienceScope.GUILD_VISIBLE:
+        crosses_member_boundary = not belongs_to_interlocutor
+        if audience_scope is AudienceScope.GUILD_VISIBLE or crosses_member_boundary:
             evidence = tuple(
                 receipt
                 for receipt in evidence
-                if _guild_visible_evidence_allowed(
+                if _cross_member_evidence_allowed(
                     connection,
                     guild_id=bundle.guild_id,
                     receipt_id=receipt.receipt_id,
@@ -359,8 +364,12 @@ def _filter_bundle_for_audience(
 
     return replace(
         bundle,
-        speaker_profile=tuple(trim_item(item) for item in speaker_profile),
-        contextual_memories=tuple(trim_item(item) for item in contextual_memories),
+        speaker_profile=tuple(
+            trim_item(item, belongs_to_interlocutor=True) for item in speaker_profile
+        ),
+        contextual_memories=tuple(
+            trim_item(item, belongs_to_interlocutor=False) for item in contextual_memories
+        ),
     )
 
 
