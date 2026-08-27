@@ -94,6 +94,45 @@ def test_authorized_memory_context_is_secret_guarded_before_provider(monkeypatch
         )
 
 
+def test_authorized_memory_context_over_4000_chars_is_scanned_without_rejection(monkeypatch):
+    rendered = "Fact: " + ("ordinary social context " * 260)
+    assert len(rendered) > 4000
+    monkeypatch.setattr(
+        memory_context,
+        "render_memory_context_for_prompt",
+        lambda _bundle: rendered,
+    )
+
+    prompt = chat_response.build_chat_prompt(
+        route=_route(),
+        bundle=_bundle(),
+        current_message="Continue.",
+    )
+
+    assert rendered in prompt
+
+
+def test_long_authorized_context_secret_near_end_is_still_rejected(monkeypatch):
+    rendered = (
+        "Fact: "
+        + ("ordinary social context " * 260)
+        + " postgresql://alice:s3cr3tpass@db.internal/app"
+    )
+    assert len(rendered) > 4000
+    monkeypatch.setattr(
+        memory_context,
+        "render_memory_context_for_prompt",
+        lambda _bundle: rendered,
+    )
+
+    with pytest.raises(chat_response.ChatInputRejected):
+        chat_response.build_chat_prompt(
+            route=_route(),
+            bundle=_bundle(),
+            current_message="Continue.",
+        )
+
+
 def test_clean_chat_reply_preserves_paragraphs_and_clips():
     value = "  First   line  \n\n\n Second    line  "
     assert chat_response.clean_chat_reply(value, max_chars=80) == "First line\n\nSecond line"
