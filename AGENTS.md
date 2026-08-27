@@ -226,9 +226,7 @@ Important:
 
 > **Internal profile creation is part of the intended Wilhelmina system. Do not invent a separate “may Wilhelmina build a profile about you?” permission ceremony.**
 
-The previously implemented `adult_memory_consent` / exact `memory_consent_version` authorization architecture was an agent-created product assumption and must not be treated as permanent product doctrine.
-
-It is technical debt pending deliberate removal/migration.
+The previously implemented `adult_memory_consent` / exact `memory_consent_version` authorization architecture was an agent-created product assumption. It has been removed from the current stacked implementation and must not be treated as permanent product doctrine or revived from historical branches/discussion.
 
 Do not reintroduce equivalent permission gates under a different name without explicit product approval.
 
@@ -806,8 +804,8 @@ The current broad build sequence is:
 1. Foundation reconciliation — completed.
 2. Memory architecture — completed.
 3. Memory administration — completed.
-4. Automatic memory extraction — current work.
-5. Context intelligence / retrieval.
+4. Automatic memory extraction — **BUILT + TESTED + IN REVIEW** in the current stacked PR sequence; not merged.
+5. Context intelligence / retrieval — current work.
 6. Wilhelmina's memory-aware chat brain.
 7. Hardening, deployment, broader listening pathway, and final operational readiness.
 
