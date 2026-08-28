@@ -11,18 +11,55 @@ from services.chat import AudienceScope, ChatRoute
 # It is useful when deciding whether to queue raw extraction text, but is too broad for live
 # conversation because phrases such as "password managers" can look like label + value. Chat
 # keeps every concrete standalone token/private-ID/address pattern and replaces only that broad
-# heuristic with a separator-required credential-value pattern below.
+# heuristic with value-aware credential patterns below.
 CHAT_EXTRACTION_TOKEN_PATTERNS = (
     memory_extraction.TOKEN_PATTERNS[:8] + memory_extraction.TOKEN_PATTERNS[9:]
 )
-CHAT_LABELLED_CREDENTIAL_PATTERN = re.compile(
+
+# Non-password credential labels generally carry opaque token-like values, so an explicit
+# assignment plus an 8+ character token is a strong signal without blocking topic discussion.
+CHAT_LABELLED_TOKEN_CREDENTIAL_PATTERN = re.compile(
     r"\b(?:(?:aws\s+)?(?:secret\s+access\s+key|access\s+key(?:\s+id)?|"
     r"session\s+token)|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|"
-    r"auth(?:entication|orization)?[ _-]?token|bearer[ _-]?token|password|passphrase|"
-    r"secret[ _-]?key|client[ _-]?secret|private[ _-]?token)\b"
+    r"auth(?:entication|orization)?[ _-]?token|bearer[ _-]?token|secret[ _-]?key|"
+    r"client[ _-]?secret|private[ _-]?token)\b"
     r"\s*(?:is|=|:)\s*[A-Za-z0-9_./+=-]{8,}\b",
     re.IGNORECASE,
 )
+
+# Password/passphrase values can legitimately contain whitespace. ':' and '=' are treated as
+# strong assignment signals; natural-language 'is' is blocked only when the following value is
+# secret-shaped (quoted, contains digits/symbols, or resembles a four-word passphrase). This
+# keeps harmless text such as "Password managers are useful" out of the credential filter.
+CHAT_LABELLED_PASSWORD_PATTERN = re.compile(
+    r"\b(?:password|passphrase)\b\s*(?:"
+    r"(?:=|:)\s*[^\r\n]{1,128}"
+    r"|is\s+(?:"
+    r"['\"][^'\"\r\n]{1,128}['\"]"
+    r"|(?=[^\r\n]{1,128}(?:$|[.!?]))(?=[^\r\n]*[0-9_./+=:@-])[^\r\n]{1,128}"
+    r"|(?:[A-Za-z][A-Za-z'-]{1,31}\s+){3,}[A-Za-z][A-Za-z'-]{1,31}"
+    r")"
+    r")",
+    re.IGNORECASE,
+)
+
+CHAT_LABELLED_BANK_CREDENTIAL_PATTERNS = (
+    re.compile(
+        r"\brouting[ _-]?number\b\s*(?:is|=|:)\s*(?:\d[ -]?){9}\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:bank[ _-]?account(?:[ _-]?number)?|account[ _-]?number|iban)\b"
+        r"\s*(?:is|=|:)\s*[A-Z0-9][A-Z0-9 -]{3,33}\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:cvv|cvc|card[ _-]?security[ _-]?code)\b"
+        r"\s*(?:is|=|:)\s*\d{3,4}\b",
+        re.IGNORECASE,
+    ),
+)
+
 CHAT_SECRET_PATTERNS = (
     re.compile(
         r"-----BEGIN(?: [A-Z0-9-]+)* PRIVATE KEY(?: BLOCK)?-----",
@@ -85,8 +122,13 @@ def _scan_chat_secret_material(value: str) -> str:
     for pattern in CHAT_EXTRACTION_TOKEN_PATTERNS:
         if pattern.search(cleaned):
             raise ChatInputRejected("chat text contains prohibited secret material")
-    if CHAT_LABELLED_CREDENTIAL_PATTERN.search(cleaned):
+    if CHAT_LABELLED_TOKEN_CREDENTIAL_PATTERN.search(cleaned):
         raise ChatInputRejected("chat text contains prohibited secret material")
+    if CHAT_LABELLED_PASSWORD_PATTERN.search(cleaned):
+        raise ChatInputRejected("chat text contains prohibited secret material")
+    for pattern in CHAT_LABELLED_BANK_CREDENTIAL_PATTERNS:
+        if pattern.search(cleaned):
+            raise ChatInputRejected("chat text contains prohibited financial credential material")
     for match in re.finditer(r"(?:\d[ -]?){13,19}", cleaned):
         digits = re.sub(r"\D", "", match.group(0))
         if memory_extraction._luhn_valid(digits):
