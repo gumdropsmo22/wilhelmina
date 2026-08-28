@@ -28,9 +28,8 @@ CHAT_LABELLED_TOKEN_CREDENTIAL_PATTERN = re.compile(
 )
 
 # Password/passphrase values can legitimately contain whitespace. ':' and '=' are treated as
-# strong assignment signals; natural-language 'is' is blocked only when the following value is
-# quoted or carries a digit/symbol signal. A separate possessive pattern covers classic long
-# all-word passphrases without turning generic sentences about passwords into prohibited data.
+# strong assignment signals; natural-language 'is' is blocked when the following value is
+# quoted or carries a digit/symbol signal. All-word passphrases are handled separately below.
 CHAT_LABELLED_PASSWORD_PATTERN = re.compile(
     r"\b(?:password|passphrase)\b\s*(?:"
     r"(?:=|:)\s*[^\r\n]{1,128}"
@@ -41,9 +40,17 @@ CHAT_LABELLED_PASSWORD_PATTERN = re.compile(
     r")",
     re.IGNORECASE,
 )
-CHAT_POSSESSIVE_PASSPHRASE_PATTERN = re.compile(
-    r"\b(?:my|your|our|their|the)\s+(?:password|passphrase)\s+is\s+"
-    r"(?:[A-Za-z][A-Za-z'-]{1,31}\s+){3,}[A-Za-z][A-Za-z'-]{1,31}\b",
+
+# Catch bare and possessive all-word passphrases such as "password is correct horse battery
+# staple" and "Alice's password is blue meadow silver lantern". A small predicate exclusion
+# prevents ordinary explanatory sentences such as "a password is important for account
+# security" from being misclassified merely because they contain four following words.
+CHAT_ALL_WORD_PASSPHRASE_PATTERN = re.compile(
+    r"\b(?:password|passphrase)\s+is\s+"
+    r"(?!(?:important|useful|necessary|required|recommended|common|uncommon|secure|insecure|"
+    r"safe|unsafe|strong|weak|good|bad|something|anything|nothing|typically|usually|often|"
+    r"sometimes|always|never|meant|intended)\b)"
+    r"(?:[A-Za-z][A-Za-z'-]*\s+){3,}[A-Za-z][A-Za-z'-]*\b",
     re.IGNORECASE,
 )
 
@@ -130,7 +137,7 @@ def _scan_chat_secret_material(value: str) -> str:
         raise ChatInputRejected("chat text contains prohibited secret material")
     if CHAT_LABELLED_PASSWORD_PATTERN.search(cleaned):
         raise ChatInputRejected("chat text contains prohibited secret material")
-    if CHAT_POSSESSIVE_PASSPHRASE_PATTERN.search(cleaned):
+    if CHAT_ALL_WORD_PASSPHRASE_PATTERN.search(cleaned):
         raise ChatInputRejected("chat text contains prohibited secret material")
     for pattern in CHAT_LABELLED_BANK_CREDENTIAL_PATTERNS:
         if pattern.search(cleaned):
@@ -334,7 +341,15 @@ async def generate_chat_reply_async(
     if result is None:
         return _fallback("provider_unavailable")
 
-    text = clean_chat_reply(result.text)
+    raw_text = str(result.text or "")
+    if not raw_text.strip():
+        return _fallback("empty_response")
+    try:
+        validate_chat_output(raw_text)
+    except ChatInputRejected:
+        return _fallback("output_rejected")
+
+    text = clean_chat_reply(raw_text)
     if not text:
         return _fallback("empty_response")
     try:
