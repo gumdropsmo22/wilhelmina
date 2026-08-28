@@ -137,8 +137,9 @@ def test_delete_removes_both_sides_of_source_exchange():
         assistant_text="answer",
     )
 
-    assert runtime.remove_source_message(500) == 2
+    assert runtime.note_source_deleted(500) == 2
     assert runtime.history(key) == ()
+    assert runtime.source_text_for_record(500, "old") is None
 
 
 def test_edit_rewrites_only_member_side_and_keeps_prior_reply():
@@ -152,13 +153,55 @@ def test_edit_rewrites_only_member_side_and_keeps_prior_reply():
         assistant_text="answer",
     )
 
-    assert runtime.replace_member_message(500, "new") is True
+    assert runtime.note_source_edit(500, "new") is True
     history = runtime.history(key)
     assert history[0].content == "new"
     assert history[1].content == "answer"
 
 
-def test_new_runtime_has_no_persisted_history_or_dedupe_state():
+def test_delete_arriving_before_history_record_wins_over_stale_event_snapshot():
+    runtime = chat_continuity.ChatContinuityRuntime()
+    key = runtime.conversation_key(route=_route(private=True), envelope=_envelope())
+
+    assert runtime.note_source_deleted(500) == 0
+    assert runtime.record_exchange(
+        key,
+        source_message_id=500,
+        author_user_id=2,
+        user_text="stale text",
+        assistant_text="stale answer",
+    ) is False
+    assert runtime.history(key) == ()
+
+
+def test_safe_edit_arriving_before_history_record_replaces_stale_event_snapshot():
+    runtime = chat_continuity.ChatContinuityRuntime()
+    key = runtime.conversation_key(route=_route(private=True), envelope=_envelope())
+
+    assert runtime.note_source_edit(500, "new text") is False
+    assert runtime.record_exchange(
+        key,
+        source_message_id=500,
+        author_user_id=2,
+        user_text="old text",
+        assistant_text="answer to old text",
+    ) is True
+    history = runtime.history(key)
+    assert history[0].content == "new text"
+    assert history[1].content == "answer to old text"
+
+
+def test_source_mutation_tombstones_are_bounded():
+    runtime = chat_continuity.ChatContinuityRuntime(max_recent_message_ids=32)
+    for message_id in range(100):
+        runtime.note_source_deleted(message_id)
+
+    assert len(runtime._source_mutations) == 32
+    assert runtime.source_text_for_record(99, "fallback") is None
+    assert runtime.source_text_for_record(0, "fallback") == "fallback"
+
+
+def test_new_runtime_has_no_persisted_history_dedupe_or_source_mutation_state():
     first = chat_continuity.ChatContinuityRuntime()
     key = first.conversation_key(route=_route(private=True), envelope=_envelope())
     first.record_exchange(
@@ -168,6 +211,7 @@ def test_new_runtime_has_no_persisted_history_or_dedupe_state():
         user_text="hello",
         assistant_text="hi",
     )
+    first.note_source_edit(500, "edited")
     first.claim_message(500)
     first.complete_message(500)
 
@@ -175,3 +219,4 @@ def test_new_runtime_has_no_persisted_history_or_dedupe_state():
     restarted_key = restarted.conversation_key(route=_route(private=True), envelope=_envelope())
     assert restarted.history(restarted_key) == ()
     assert restarted.claim_message(500) is True
+    assert restarted.source_text_for_record(500, "fresh") == "fresh"
