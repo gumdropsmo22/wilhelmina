@@ -7,6 +7,22 @@ from dataclasses import dataclass
 from services import ai, memory_context, memory_extraction, persona
 from services.chat import AudienceScope, ChatRoute
 
+# TOKEN_PATTERNS[8] is the extraction worker's intentionally broad labelled-value heuristic.
+# It is useful when deciding whether to queue raw extraction text, but is too broad for live
+# conversation because phrases such as "password managers" can look like label + value. Chat
+# keeps every concrete standalone token/private-ID/address pattern and replaces only that broad
+# heuristic with a separator-required credential-value pattern below.
+CHAT_EXTRACTION_TOKEN_PATTERNS = (
+    memory_extraction.TOKEN_PATTERNS[:8] + memory_extraction.TOKEN_PATTERNS[9:]
+)
+CHAT_LABELLED_CREDENTIAL_PATTERN = re.compile(
+    r"\b(?:(?:aws\s+)?(?:secret\s+access\s+key|access\s+key(?:\s+id)?|"
+    r"session\s+token)|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|"
+    r"auth(?:entication|orization)?[ _-]?token|bearer[ _-]?token|password|passphrase|"
+    r"secret[ _-]?key|client[ _-]?secret|private[ _-]?token)\b"
+    r"\s*(?:is|=|:)\s*[A-Za-z0-9_./+=-]{8,}\b",
+    re.IGNORECASE,
+)
 CHAT_SECRET_PATTERNS = (
     re.compile(
         r"-----BEGIN(?: [A-Z0-9-]+)* PRIVATE KEY(?: BLOCK)?-----",
@@ -66,9 +82,11 @@ def _scan_chat_secret_material(value: str) -> str:
     if not cleaned:
         raise ChatInputRejected("chat text cannot be empty")
 
-    for pattern in memory_extraction.TOKEN_PATTERNS:
+    for pattern in CHAT_EXTRACTION_TOKEN_PATTERNS:
         if pattern.search(cleaned):
             raise ChatInputRejected("chat text contains prohibited secret material")
+    if CHAT_LABELLED_CREDENTIAL_PATTERN.search(cleaned):
+        raise ChatInputRejected("chat text contains prohibited secret material")
     for match in re.finditer(r"(?:\d[ -]?){13,19}", cleaned):
         digits = re.sub(r"\D", "", match.group(0))
         if memory_extraction._luhn_valid(digits):
