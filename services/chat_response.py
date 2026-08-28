@@ -42,14 +42,15 @@ CHAT_LABELLED_PASSWORD_PATTERN = re.compile(
 )
 
 # Catch bare and possessive all-word passphrases such as "password is correct horse battery
-# staple" and "Alice's password is blue meadow silver lantern". A small predicate exclusion
-# prevents ordinary explanatory sentences such as "a password is important for account
-# security" from being misclassified merely because they contain four following words.
+# staple" and "Alice's password is blue meadow silver lantern". State/predicate exclusions
+# prevent ordinary explanations such as "a password is important for account security" or
+# "her password is stored in a password manager" from becoming false credential hits.
 CHAT_ALL_WORD_PASSPHRASE_PATTERN = re.compile(
     r"\b(?:password|passphrase)\s+is\s+"
     r"(?!(?:important|useful|necessary|required|recommended|common|uncommon|secure|insecure|"
     r"safe|unsafe|strong|weak|good|bad|something|anything|nothing|typically|usually|often|"
-    r"sometimes|always|never|meant|intended)\b)"
+    r"sometimes|always|never|meant|intended|forgotten|unknown|missing|saved|stored|changed|"
+    r"reset|expired|compromised|valid|invalid|correct|incorrect|set)\b)"
     r"(?:[A-Za-z][A-Za-z'-]*\s+){3,}[A-Za-z][A-Za-z'-]*\b",
     re.IGNORECASE,
 )
