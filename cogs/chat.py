@@ -185,9 +185,6 @@ class Chat(commands.Cog):
                     fallback_reason="unexpected_generation_failure",
                 )
 
-            # A delete or unsafe edit can arrive while the provider request is in flight.
-            # That later Discord source state wins over the stale event snapshot: do not send a
-            # reply that is now anchored to deleted/withheld source content.
             if self.runtime.source_text_for_record(envelope.message_id, envelope.content) is None:
                 self.runtime.complete_message(envelope.message_id)
                 logger.info(
@@ -200,7 +197,7 @@ class Chat(commands.Cog):
                 return
 
             try:
-                await message.reply(
+                sent_reply = await message.reply(
                     reply.text,
                     mention_author=False,
                     allowed_mentions=discord.AllowedMentions.none(),
@@ -215,6 +212,32 @@ class Chat(commands.Cog):
                     envelope.author_user_id,
                     type(exc).__name__,
                     getattr(exc, "status", None),
+                )
+                return
+
+            # Raw source mutation handlers run independently of this conversation lock. If the
+            # source is deleted or becomes unsafe during the network await above, remove the
+            # just-created bot reply when possible and never admit the stale exchange to history.
+            if self.runtime.source_text_for_record(envelope.message_id, envelope.content) is None:
+                try:
+                    await sent_reply.delete()
+                except (discord.HTTPException, AttributeError) as exc:
+                    logger.warning(
+                        "chat_send_cleanup_failed guild_id=%s message_id=%s author_user_id=%s "
+                        "exception=%s status=%s",
+                        home_guild_id,
+                        envelope.message_id,
+                        envelope.author_user_id,
+                        type(exc).__name__,
+                        getattr(exc, "status", None),
+                    )
+                self.runtime.complete_message(envelope.message_id)
+                logger.info(
+                    "chat_reply_retracted reason=source_deleted_or_withheld guild_id=%s "
+                    "message_id=%s author_user_id=%s",
+                    home_guild_id,
+                    envelope.message_id,
+                    envelope.author_user_id,
                 )
                 return
 
