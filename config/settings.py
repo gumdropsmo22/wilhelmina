@@ -92,6 +92,12 @@ COG_FLAGS: tuple[CogFlag, ...] = (
         description="Interaction-scoped automatic Memory Ledger extraction.",
     ),
     CogFlag(
+        extension="cogs.chat",
+        env_var="ENABLE_CHAT",
+        default_enabled=False,
+        description="Memory-aware direct-interaction chat routing.",
+    ),
+    CogFlag(
         extension="cogs.invite",
         env_var="ENABLE_INVITE",
         default_enabled=False,
@@ -346,6 +352,7 @@ ENABLE_HELP = _get_bool_or_default("ENABLE_HELP", default=True)
 ENABLE_RULES = _get_bool_or_default("ENABLE_RULES", default=True)
 ENABLE_MEMORY_ADMIN = _get_bool_or_default("ENABLE_MEMORY_ADMIN", default=True)
 ENABLE_MEMORY_EXTRACTION = _get_bool_or_default("ENABLE_MEMORY_EXTRACTION", default=False)
+ENABLE_CHAT = _get_bool_or_default("ENABLE_CHAT", default=False)
 ENABLE_INVITE = _get_bool_or_default("ENABLE_INVITE", default=False)
 ENABLE_ROLL = _get_bool_or_default("ENABLE_ROLL", default=False)
 ENABLE_EIGHT_BALL = _get_bool_or_default("ENABLE_EIGHT_BALL", default=False)

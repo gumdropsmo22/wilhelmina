@@ -21,6 +21,7 @@ cogs.help               /help
 cogs.rules              /rules, /rules-admin ...
 cogs.memory_admin       /memory-admin ...
 cogs.memory_extraction  interaction-scoped automatic Memory Ledger extraction
+cogs.chat               Phase-6A interaction routing + authorized context preparation
 cogs.invite             /invite
 cogs.roll               /roll
 cogs.eight_ball         /8ball
@@ -28,7 +29,7 @@ cogs.fortune            /fortune
 cogs.broadcasts         /broadcast-admin ...
 ```
 
-Phase-5 context intelligence is currently a service-layer capability (`services.memory_context`), not a Discord cog or command. The later Phase-6 chat cog will consume it.
+Phase-5 context intelligence is the service-layer retrieval capability in `services.memory_context`. Phase 6A adds `services.chat` and `cogs.chat` to route approved Discord interactions into audience-aware authorized memory context. Phase 6A deliberately does **not** generate an OpenAI chat response yet.
 
 Each optional feature has its own flag:
 
@@ -37,6 +38,7 @@ ENABLE_HELP=true
 ENABLE_RULES=true
 ENABLE_MEMORY_ADMIN=true
 ENABLE_MEMORY_EXTRACTION=false
+ENABLE_CHAT=false
 ENABLE_INVITE=false
 ENABLE_ROLL=false
 ENABLE_EIGHT_BALL=false
@@ -146,6 +148,8 @@ memory_extraction_jobs
 schema_migrations
 ```
 
+Phase 6A adds no chat transcript table and persists no new conversational content.
+
 Private identity schema v12 stores preferred name, full canonical birth date, and timestamps; current Discord display name remains in the Coven Registry. The obsolete adult-memory-consent timestamp/version columns are physically removed. The existing under-18 profile-completion behavior remains unchanged and is a separate product decision.
 
 The stored guild configuration is the source of truth for server role/channel IDs after Phase 2. Environment variables for role/channel IDs are not used by the new config layer.
@@ -250,17 +254,37 @@ See `docs/memory_extraction.md` for the full eligibility, privacy, queue, rollou
 
 ## Phase 5 memory context intelligence
 
-`services.memory_context` assembles deterministic memory context for the later Phase-6 chat brain. It is not a new Discord command and has no separate environment flag because nothing invokes it from live chat yet.
+`services.memory_context` assembles deterministic memory context for the Phase-6 chat brain.
 
 The current speaker receives their complete **permitted** active profile: `cross_member` and their own `owner_only` memories, but never `admin_only`. Relevant memories about other members are retrieved only from `cross_member` rows through local FTS and explicit member/entity links. Authorization happens before ranking, so importance, relevance, recency, or contradiction cannot widen a memory's reveal scope.
 
-Phase 5 also expands revealable contradiction partners, includes bounded receipt evidence, preserves `Fact`/`Inference`/`Impression`/unverified `Gossip`, and re-runs the deterministic hard-secret guard at retrieval time so a malformed or legacy credential-containing row cannot be resurrected into a future prompt.
+Phase 5 also expands revealable contradiction partners, includes bounded receipt evidence, preserves `Fact`/`Inference`/`Impression`/unverified `Gossip`, and re-runs the deterministic hard-secret guard at retrieval time so a malformed or legacy credential-containing row cannot be resurrected into a future prompt. Corruption-tolerant retrieval also rechecks guild isolation, valid privacy/reveal combinations, Admin-note invariants, and recognizable private-key formats before context can escape the service layer.
 
 The service uses the speaker's trusted identity context, including current Discord display name, preferred name, full canonical birth date, and locally calculated age. The existing under-18 profile-completion behavior remains **PRODUCT DECISION PENDING** and Phase 5 does not expand it.
 
 This phase does **not** build the separately policy-gated permanent/evolving personality-analysis dossier, does not add ambient whole-server listening, does not create a new consent/version gate, does not call OpenAI, and does not persist a new context table.
 
 See `docs/memory_context.md` for the authorization matrix, ranking, contradiction, evidence, secret-hardening, rollback, and validation contract.
+
+## Phase 6A chat contract and Discord routing
+
+`cogs.chat` and `services.chat` add the first tranche of Wilhelmina's memory-aware live-chat architecture. The feature is disabled by default:
+
+```env
+ENABLE_CHAT=false
+```
+
+Phase 6A recognizes only approved direct-interaction surfaces: one-to-one DMs, direct mentions, resolvable replies to Wilhelmina, and ordinary human text in the designated Wilhelmina channel. Unaddressed chatter elsewhere in the guild is ignored. Bots, webhooks, empty messages, wrong-guild messages, and existing `!` prefix commands are also excluded.
+
+Chat and automatic memory extraction are independent. `ENABLE_CHAT=true` requests Message Content intent even when extraction is off, because the designated free-form channel requires message content. Pausing Memory Ledger collection does **not** mute chat or prevent already-authorized memory from being used for conversation.
+
+Phase 6A adds an audience boundary that Phase 5 alone did not need: the speaker's `owner_only` memories may remain available in a one-to-one DM, but they are removed before any guild-visible prompt can exist. Other-member context remains `cross_member` only and `admin_only` never enters ordinary chat context. This authorization is local Python logic, not a model instruction.
+
+Trusted explicit member references come only from Discord-resolved mentions/reply authors or an exact Coven Mark resolved through the local Registry. Plain-language/fuzzy names cannot become retrieval IDs.
+
+The Phase-6A cog currently stops after authorized context preparation and content-free diagnostics. It makes **no OpenAI chat call and sends no generated reply yet**. Prompt construction/provider execution starts in Phase 6B.
+
+See `docs/chat.md` for the full routing matrix, audience rules, trusted-reference boundary, configuration, tests, and rollback contract.
 
 ## Scheduled Daily Broadcasts
 
@@ -316,17 +340,22 @@ rules_acceptance     rules acceptance copy
 admin                admin/status copy hooks
 fortune              /fortune
 welcome              future welcome messages
+chat                 Phase-6 chat response profile
 broadcast_morning    The Vanguard Frequency generation
 broadcast_evening    W.W.N. Broadcast generation
 ```
 
 This keeps Wilhelmina recognizable while allowing each feature to apply the right functional limits. Protected/identity traits may be mentioned factually when relevant; the persona boundary is against using the trait itself as the basis for dehumanizing or comparable targeted abuse.
 
+The `chat` profile is defined in Phase 6A so later chat generation never silently falls back to the `help` profile. Phase 6A itself does not call the Persona Engine's AI renderer.
+
 ## AI-backed features
 
 `/8ball`, `/fortune`, `/help`, `/rules`, and `/broadcast-admin preview/send-test` can use AI first when `OPENAI_API_KEY` is configured, then fall back to static or stored responses if AI is unavailable.
 
 Automatic Memory Ledger extraction is different: when enabled, it uses the private structured-memory provider path and fails closed if the required private retention configuration is unavailable. It has no static fallback that persists guessed memories.
+
+Phase-6A chat routing is not AI-backed yet. The private chat provider path, prompt construction, and generated Discord replies are Phase-6B work.
 
 ```env
 OPENAI_API_KEY=
@@ -369,6 +398,7 @@ ENABLE_HELP=true
 ENABLE_RULES=true
 ENABLE_MEMORY_ADMIN=true
 ENABLE_MEMORY_EXTRACTION=false
+ENABLE_CHAT=false
 ENABLE_INVITE=false
 ENABLE_ROLL=false
 ENABLE_EIGHT_BALL=false
