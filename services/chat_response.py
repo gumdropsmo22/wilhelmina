@@ -50,7 +50,7 @@ CHAT_ALL_WORD_PASSPHRASE_PATTERN = re.compile(
     r"(?!(?:important|useful|necessary|required|recommended|common|uncommon|secure|insecure|"
     r"safe|unsafe|strong|weak|good|bad|something|anything|nothing|typically|usually|often|"
     r"sometimes|always|never|meant|intended|forgotten|unknown|missing|saved|stored|changed|"
-    r"reset|expired|compromised|valid|invalid|correct|incorrect|set)\b)"
+    r"reset|expired|compromised|valid|invalid|set)\b)"
     r"(?:[A-Za-z][A-Za-z'-]*\s+){3,}[A-Za-z][A-Za-z'-]*\b",
     re.IGNORECASE,
 )
