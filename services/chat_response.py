@@ -29,17 +29,21 @@ CHAT_LABELLED_TOKEN_CREDENTIAL_PATTERN = re.compile(
 
 # Password/passphrase values can legitimately contain whitespace. ':' and '=' are treated as
 # strong assignment signals; natural-language 'is' is blocked only when the following value is
-# secret-shaped (quoted, contains digits/symbols, or resembles a four-word passphrase). This
-# keeps harmless text such as "Password managers are useful" out of the credential filter.
+# quoted or carries a digit/symbol signal. A separate possessive pattern covers classic long
+# all-word passphrases without turning generic sentences about passwords into prohibited data.
 CHAT_LABELLED_PASSWORD_PATTERN = re.compile(
     r"\b(?:password|passphrase)\b\s*(?:"
     r"(?:=|:)\s*[^\r\n]{1,128}"
     r"|is\s+(?:"
     r"['\"][^'\"\r\n]{1,128}['\"]"
     r"|(?=[^\r\n]{1,128}(?:$|[.!?]))(?=[^\r\n]*[0-9_./+=:@-])[^\r\n]{1,128}"
-    r"|(?:[A-Za-z][A-Za-z'-]{1,31}\s+){3,}[A-Za-z][A-Za-z'-]{1,31}"
     r")"
     r")",
+    re.IGNORECASE,
+)
+CHAT_POSSESSIVE_PASSPHRASE_PATTERN = re.compile(
+    r"\b(?:my|your|our|their|the)\s+(?:password|passphrase)\s+is\s+"
+    r"(?:[A-Za-z][A-Za-z'-]{1,31}\s+){3,}[A-Za-z][A-Za-z'-]{1,31}\b",
     re.IGNORECASE,
 )
 
@@ -125,6 +129,8 @@ def _scan_chat_secret_material(value: str) -> str:
     if CHAT_LABELLED_TOKEN_CREDENTIAL_PATTERN.search(cleaned):
         raise ChatInputRejected("chat text contains prohibited secret material")
     if CHAT_LABELLED_PASSWORD_PATTERN.search(cleaned):
+        raise ChatInputRejected("chat text contains prohibited secret material")
+    if CHAT_POSSESSIVE_PASSPHRASE_PATTERN.search(cleaned):
         raise ChatInputRejected("chat text contains prohibited secret material")
     for pattern in CHAT_LABELLED_BANK_CREDENTIAL_PATTERNS:
         if pattern.search(cleaned):
