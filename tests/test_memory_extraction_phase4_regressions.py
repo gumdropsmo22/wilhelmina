@@ -287,7 +287,7 @@ def test_v10_processing_claim_is_invalidated_and_old_style_reclaim_is_blocked(tm
             )
 
 
-def test_legacy_consent_version_does_not_revoke_profile_or_safe_edit(
+def test_completed_profile_allows_safe_raw_edit_requeue(
     database_path,
     monkeypatch,
 ):
@@ -303,14 +303,6 @@ def test_legacy_consent_version_does_not_revoke_profile_or_safe_edit(
         )
         memory = _add_receipt_memory(connection)
         queued = _enqueue(connection, content="I prefer tea")
-        connection.execute(
-            """
-            UPDATE coven_member_identity_profiles
-            SET memory_consent_version = ?
-            WHERE guild_id = 100 AND user_id = 2
-            """,
-            (member_profiles.LEGACY_MEMORY_CONSENT_VERSION,),
-        )
 
     payload = SimpleNamespace(
         guild_id=100,
@@ -329,14 +321,11 @@ def test_legacy_consent_version_does_not_revoke_profile_or_safe_edit(
     with managed_connection(database_path) as connection:
         current = memory_extraction.get_job(connection, queued.id)
         receipt = memory_ledger.list_receipts(connection, memory.id)[0]
-        profile = member_profiles.get_member_identity(
+        assert member_profiles.profile_is_memory_eligible(
             connection,
             guild_id=100,
             user_id=2,
-            required=True,
-        )
-    assert profile is not None
-    assert profile.has_current_memory_consent is False
+        ) is True
     assert current is not None
     assert current.status == "pending"
     assert current.content == "Actually I prefer coffee"

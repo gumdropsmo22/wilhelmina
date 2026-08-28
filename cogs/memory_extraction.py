@@ -86,7 +86,7 @@ class MemoryExtraction(commands.Cog):
         settings = memory_ledger.get_or_create_settings(connection, int(home_guild_id))
         if not settings.collection_enabled:
             return None
-        if not member_profiles.profile_has_current_consent(
+        if not member_profiles.profile_is_memory_eligible(
             connection,
             guild_id=int(home_guild_id),
             user_id=int(user_id),
@@ -139,12 +139,12 @@ class MemoryExtraction(commands.Cog):
             settings = memory_ledger.get_or_create_settings(connection, home_guild_id)
             if not settings.collection_enabled:
                 return Eligibility(False, reason="persistent_pause")
-            if not member_profiles.profile_has_current_consent(
+            if not member_profiles.profile_is_memory_eligible(
                 connection,
                 guild_id=home_guild_id,
                 user_id=message.author.id,
             ):
-                return Eligibility(False, reason="consent_missing")
+                return Eligibility(False, reason="profile_missing")
 
         if is_dm:
             return Eligibility(True, home_guild_id, "dm", "dm")

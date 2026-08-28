@@ -2,44 +2,48 @@
 
 The Memory Ledger is Wilhelmina's private, persistent local memory. SQLite is the canonical source of truth. OpenAI may interpret already-authorized text or reason over already-authorized context, but model output never authorizes access, disclosure, replacement, or deletion.
 
-The product target remains an adult social character: sharp, vulgar, funny, intrusive when useful, and able to remember callbacks, contradictions, preferences, gossip, names, birthdays, projects, and other ordinary social context. Target voice: **mean enough to delight the room, sharp enough to feel intelligent, and still useful.**
+The product target is a sharp, socially aware character that remembers callbacks, contradictions, preferences, gossip, names, birthdays, projects, relationships, communication habits, and other useful social context. Privacy controls exist to prevent dangerous retention or disclosure, not to flatten ordinary social memory.
 
-Quality and memory richness take priority over minimizing model/token cost. Privacy controls exist to prevent dangerous retention or disclosure, not to make Wilhelmina artificially stupid.
+## Current persistence layers
 
-## Current persistence status
+### Private member identity — schema v12
 
-### Member identity schema v8
+The identity profile stores:
 
-The private identity profile stores:
-
-- current Discord display name through the Registry;
+- guild ID;
+- Discord user ID;
 - member-provided preferred name;
 - full self-reported birth date;
-- adult-memory consent timestamp;
-- version of the memory disclosure accepted.
+- created/updated timestamps.
 
-The current disclosure covers interaction memory, DMs directly with Wilhelmina, and ordinary cross-member social callbacks. Legacy consent is not silently upgraded. Full birth date remains canonical and current age is calculated locally when trusted context is assembled.
+Current Discord display name remains in the Coven Registry and is joined into trusted identity context. Full birth date is canonical; age is calculated locally for the relevant date.
 
-### Memory Ledger schema v9
+Schema v12 physically removes the former `adult_memory_consent_at` and `memory_consent_version` fields. Memory/chat authorization does not depend on a consent phrase or disclosure-version token. A completed private profile is only the identity prerequisite; runtime/source/privacy gates remain separate.
 
-Phase 2 upgraded the Memory Ledger from v6 to v9. Version 8 is already occupied by identity-consent migration, so v9 is the persistence version used by the current control surface.
+The existing under-18 profile-completion behavior remains unchanged and is **PRODUCT DECISION PENDING**.
 
-Schema v9 contains:
+### Memory Ledger — schema v9
+
+The persistent ledger contains:
 
 - `memory_ledger_settings`;
 - `memory_records`;
 - `memory_receipts`;
 - `memory_contradictions`;
 - `memory_entities`;
-- `memory_search` (SQLite FTS5 virtual table and sync triggers).
+- `memory_search` (SQLite FTS5 plus sync triggers).
 
-Automatic Discord extraction and the live chat surface are **not** implemented by the schema/control phases. They remain later phases.
+### Automatic extraction queue — schema v11
+
+`memory_extraction_jobs` is the durable transient-work queue for interaction-scoped automatic extraction. Its v11 ownership model includes claim tokens, leases, bounded retry, source versions, absolute raw-text TTL enforcement, and migration protection against legacy tokenless workers.
+
+Phase 5 adds no new persistent table. `services.memory_context` reads the current identity/Ledger state and returns an in-memory authorization-filtered context bundle for the later chat brain.
 
 ## Memory record
 
-Every memory remains guild-scoped and attached to an existing Coven Registry/profile shell. No outsider profile is created merely because somebody gossips about a third party.
+Every memory is guild-scoped and attached to an existing Coven member/profile shell. Gossip about a non-member does not silently create an outsider profile.
 
-A v9 memory stores:
+A memory stores:
 
 - guild ID;
 - subject/member ID;
@@ -56,7 +60,7 @@ A v9 memory stores:
 - creator ID;
 - created, updated, and last-confirmed timestamps.
 
-Categories remain:
+Categories:
 
 - `Identity`
 - `Preference`
@@ -71,49 +75,49 @@ Categories remain:
 - `Wilhelmina impression`
 - `Gossip`
 
-Epistemic labels remain:
+Epistemic labels:
 
 - `Fact`
 - `Inference`
 - `Impression`
 - `Gossip`
 
-Gossip is always treated as attributed/unverified social information rather than established fact.
+Facts, inferences, impressions, and gossip remain distinguishable. Gossip is attributed/unverified social information rather than established fact.
 
 ## Privacy and reveal metadata
 
-Schema v9 separates **what a memory is** from **where it may be revealed**.
-
 ### Privacy class
 
-- `ordinary` — normal adult social memory eligible for approved conversational use.
-- `restricted` — material that requires a narrower reveal scope.
+- `ordinary` — normal social memory eligible for approved conversational use.
+- `restricted` — material requiring a narrower reveal scope.
 
 ### Reveal scope
 
-- `cross_member` — may be used in approved memory-aware conversation even when the current interlocutor is somebody else. This is the default for ordinary social memories and implements the locked "full menace" direction.
+- `cross_member` — may be used in approved memory-aware conversation when the current interlocutor is another permitted member.
 - `owner_only` — may be revealed only when the current interlocutor is the memory's subject.
-- `admin_only` — never enters ordinary member chat; reserved for founder/admin surfaces.
+- `admin_only` — reserved for founder/admin surfaces and excluded from ordinary member chat.
 
-`restricted + cross_member` is invalid. An `Admin note` is always forced to `restricted/admin_only` regardless of caller input.
+`restricted + cross_member` is invalid. `Admin note` is always forced to `restricted/admin_only`.
 
-These fields are deterministic local authorization metadata. OpenAI never gets to override them.
+These fields are deterministic local authorization metadata. OpenAI never overrides them.
+
+Phase 5 additionally fails closed if a malformed legacy/manually-edited `restricted/cross_member` row exists despite normal service validation.
 
 ### Importance
 
-`importance` is an integer from 0 through 100, default 50. It is a local retrieval/ranking signal for later context assembly. It is not an authorization signal and does not override reveal scope.
+`importance` is an integer from 0 through 100, default 50. It is a retrieval/ranking signal, not authorization, and never overrides reveal scope.
 
-## Receipts and source context
+## Receipts and evidence
 
-Every memory has evidence.
+Every surviving memory has evidence.
 
-Schema v9 adds `source_context` so a receipt can honestly represent where the evidence came from:
+Receipt `source_context` values:
 
-- `guild` — Discord guild message. Requires channel ID, message ID, and jump URL.
-- `dm` — direct message involving Wilhelmina. Requires message ID but **does not fabricate a guild jump URL**. A DM channel ID may be retained if the event layer has one, but it is not treated as a guild channel.
-- `admin` — founder/admin-authored memory. No Discord channel, message, or jump URL is fabricated.
+- `guild` — Discord guild message, with channel/message IDs and jump URL;
+- `dm` — DM involving Wilhelmina, with message ID and no fabricated guild jump URL;
+- `admin` — founder/admin-authored memory, with no fabricated Discord message metadata.
 
-Discord receipts retain:
+Discord receipts may retain:
 
 - source author;
 - source context;
@@ -126,226 +130,215 @@ Discord receipts retain:
 - edit timestamp;
 - source deletion timestamp.
 
-Deleting the original Discord message does not erase an already-captured receipt. It marks the source deleted. Permanently deleting the Memory Ledger record itself cascades its receipts.
+Deleting the source Discord message marks an existing receipt deleted; it does not rewrite history. Permanently deleting the Memory Ledger record cascades its receipts.
 
 ## Duplicate, replacement, and contradiction behavior
 
-All destructive decisions remain Python/SQLite behavior.
+All destructive or authorization-sensitive decisions remain Python/SQLite behavior.
 
 ### Exact duplicate
 
-An exact duplicate keeps one memory record, adds the new receipt, and updates confirmation timestamps.
+An exact duplicate keeps one memory record, adds a new receipt, and updates confirmation timestamps.
 
-The Phase-3 admin write path adds a fail-safe rule around duplicate metadata: privacy may tighten but never loosen. If a duplicate admin write requests a narrower privacy/reveal posture than the stored record, the existing record is tightened after the receipt merge. A later broader duplicate cannot reopen an already narrower record. Duplicate importance stays at its existing stored value unless an admin explicitly changes it through the edit command.
+**Duplicate confirmation is evidence-only.** It does not implicitly change privacy class, reveal scope, or importance. This applies even when a later admin `/memory-admin add` invocation supplies different metadata.
+
+Privacy/reveal/importance changes require an explicit admin edit. `/memory-admin edit` may intentionally tighten or loosen privacy/reveal metadata as long as the requested pair is valid. This keeps “confirm the same fact again” separate from “change how this memory may be disclosed.”
 
 ### Topic-scoped correction
 
-Ordinary replacement is **topic-scoped**, not category-wide.
+Ordinary replacement is topic-scoped, not category-wide. A new ordinary memory replaces older active ordinary memories only when guild, subject, and normalized `topic_key` match.
 
-A new ordinary memory replaces older active ordinary memories only when all of the following match:
-
-- same guild;
-- same subject;
-- same normalized `topic_key`.
-
-Unrelated memories in the same category coexist. For example, changing a coffee preference does not erase a movie preference merely because both are `Preference` memories.
-
-Superseded ordinary records and their receipts are permanently deleted. A minimal content-free `memory.replaced` audit remains.
-
-The legacy service parameter named `replace_normal_category` is temporarily preserved for compatibility; in v9 it controls topic-scoped replacement and no longer authorizes category-wide deletion.
+Unrelated memories in the same category coexist. Superseded ordinary records and their receipts are permanently deleted, with only content-free audit metadata retained.
 
 ### Gossip contradiction
 
-Multiple gossip claims about the same topic remain separate and are linked through `memory_contradictions`.
+Conflicting gossip on the same topic may coexist and is linked through `memory_contradictions`. Editing a gossip record's topic/category clears obsolete links before valid links are regenerated. Deleting either memory cascades the relationship.
 
-If a gossip record's topic/category changes, old contradiction links are cleared before valid links are regenerated. Deleting either memory cascades the relationship.
+Phase 5 may expand a selected gossip memory with bounded contradiction partners, but every partner is independently rechecked for the current interlocutor before it can enter context.
 
 ## Entity index
 
-`memory_entities` provides deterministic local relationship/index data for later retrieval. Supported entity types are:
+`memory_entities` provides deterministic local relationship/index data for retrieval.
 
-- `subject` — automatically managed member who owns the memory;
-- `topic` — automatically managed normalized topic key;
-- `member` — additional participating/referenced Coven member IDs or member keys;
+Supported types:
+
+- `subject` — system-managed owner of the memory;
+- `topic` — system-managed normalized topic;
+- `member` — other participating/referenced Coven member identifiers;
 - `term` — bounded normalized terms useful for deterministic lookup.
 
-`subject` and `topic` links are system-managed and cannot be overwritten through the public entity API. Custom entity replacement may change `member` and `term` links only.
-
-Deleting a memory cascades all entity links.
+`subject` and `topic` are system-managed. Custom entity replacement may modify only `member` and `term` links. Memory deletion cascades entity rows.
 
 ## Local full-text search
 
-`memory_search` is an SQLite FTS5 external-content index over:
+`memory_search` is an SQLite FTS5 external-content index over summary and topic key. Insert/update/delete triggers keep it synchronized.
 
-- memory summary;
-- topic key.
+Search supports deterministic filters for guild, reveal scope, optional subject IDs, and bounded result count. Normal search defaults to `cross_member`; owner/admin contexts must request their additional scopes explicitly.
 
-Insert/update/delete triggers keep it synchronized with `memory_records`.
+OpenAI is never asked which private rows it is allowed to retrieve.
 
-The service exposes local search with deterministic filters for:
+Phase 5 consumes the existing best-first FTS ordering rather than reinterpreting raw BM25 sign/magnitude, then combines that deterministic priority with explicit member-reference and importance signals after authorization.
 
-- guild;
-- reveal scope;
-- optional subject IDs;
-- bounded result limit.
+## Full-profile and Phase 5 retrieval contract
 
-Search defaults to `cross_member` records only. A later owner-context assembler may explicitly include `owner_only`. Admin-only records are never accidentally returned by the normal default.
+The current interlocutor's full permitted active profile is core chat context. Phase 5 loads that profile first: the speaker's own `cross_member` and `owner_only` rows are eligible, while `admin_only`, invalid `restricted/cross_member`, and legacy hard-secret rows are excluded.
 
-Entity lookup uses the same reveal-scope principle.
+FTS/entity retrieval supplements the speaker profile with relevant **other-member `cross_member`** memories, named/referenced members, contradiction partners, historical callbacks, and bounded evidence receipts.
 
-This search layer is for local retrieval. OpenAI is **not** asked which private rows it is allowed to retrieve.
+Authorization is applied before relevance ranking. A high-importance or highly relevant hidden row therefore cannot outrank its way into context.
 
-## Full-profile contract
+Explicit member-reference IDs are a trusted service input intended for later Discord-resolved mentions/references. They are not a model-controlled authorization mechanism.
 
-The current interlocutor's full permitted active profile remains core future chat context. FTS/entity retrieval is not a penny-saving excuse to amputate that profile.
+A distinct permanent/evolving psychological/personality-profiling layer remains externally policy-gated and is not smuggled into ordinary retrieval architecture. Phase 5 may retrieve existing `Inference` and `Impression` memories while preserving those qualified epistemic labels; it does not create a new analyzed personality dossier.
 
-Later retrieval uses these structures primarily for:
+See `docs/memory_context.md` for the complete Phase-5 contract.
 
-- relevant cross-member memories;
-- named/referenced members;
-- contradiction partners;
-- useful historical callbacks;
-- evidence/receipt budgeting.
+## Dangerous-secret boundary
 
-Authorization is applied before context is sent to the model.
+Sensitivity by topic is not itself prohibited. Medical or mental-health diagnoses, adult relationship/sexual context, politics, religion, identity, substance use, money, embarrassment, and other ordinary social material may be valid memory when the actual source/authorization rules permit it.
+
+The deterministic local guard instead rejects concrete dangerous-secret classes, including recognizable forms of:
+
+- passwords/login credentials;
+- API keys/access tokens/private secrets;
+- payment-card/banking/account credentials;
+- government/private identity-document numbers;
+- doxxing-grade exact private addresses;
+- equivalent high-risk secrets.
+
+The guard runs before provider use and again on model-controlled persisted strings such as summary/topic/term entities. Phase 5 also revalidates summaries and receipt excerpts at retrieval time so an unsafe legacy or manually modified row cannot bypass the modern ingestion guards and reappear in a future chat prompt.
+
+If a legacy memory summary fails the guard, that memory is excluded from context. If a summary is safe but a legacy receipt excerpt fails, the memory may remain while that unsafe evidence excerpt is omitted.
+
+Admin-only information and unauthorized sources remain outside ordinary disclosure regardless of content category.
+
+A DM sent directly to Wilhelmina is not rejected merely for being private. Third-party DMs Wilhelmina is not part of remain inaccessible.
+
+## Automatic interaction-scoped extraction
+
+Automatic collection is controlled by:
+
+- `ENABLE_MEMORY_EXTRACTION` feature loading;
+- `MEMORY_COLLECTION_MODE` runtime policy;
+- persistent pause/resume state;
+- completed private identity profile;
+- home-guild/source interaction checks;
+- private provider readiness;
+- deterministic dangerous-secret guard.
+
+Current eligible interaction sources are DMs with Wilhelmina, the designated Wilhelmina channel, direct mentions, and resolvable replies to Wilhelmina. Ambient unaddressed whole-server listening remains dormant.
+
+The queue/worker rechecks authorization before queue persistence, before provider use, and inside the final mutation transaction. A provider response is accepted only when the current row still matches status, content hash, and exact claim token after a final stale-job/TTL sweep.
+
+## Edit and deletion ordering
+
+Raw Discord edits are versioned with full timestamp precision. The edit transaction rejects stale/equal handlers, cancels superseded queue work, advances source version state, rechecks authorization, guards the new text, updates authorized receipt evidence, and requeues only the newest valid version.
+
+A stale worker or late edit handler cannot resurrect superseded text.
+
+Discord source deletion clears outstanding queued source text and marks existing receipts deleted.
+
+## Transient raw-text TTL
+
+Raw source text in outstanding extraction jobs has an absolute one-hour lifetime. Retry and provider processing do not extend it. An independent retention worker can revoke an in-flight claim, and the provider-return transaction runs another expiry sweep before reconciliation.
+
+A provider result returning after TTL therefore creates neither memory nor receipt mutation.
 
 ## Audit privacy
 
-Operational audit rows must not serialize memory summaries or receipt excerpts.
+Operational audit rows must not serialize memory summaries, receipt excerpts, preferred names, or birth dates.
 
-Schema-v9 service events keep only content-free metadata such as:
+Safe audit metadata includes identifiers/counts, whether a record was created/merged/replaced, privacy/reveal class changes, and source context. Raw memories and receipts belong in the Memory Ledger, not generic logs.
 
-- memory ID;
-- whether a record was created or merged;
-- whether fields changed;
-- privacy/reveal class;
-- receipt source context.
+## Founder/admin controls
 
-Permanent deletion/replacement audits remain content-free.
+`cogs.memory_admin` is enabled by `ENABLE_MEMORY_ADMIN=true` and is ephemeral, administrator-only, and home-guild restricted.
 
-Raw memories and receipts belong in the Memory Ledger, not generic audit logs.
+Implemented controls include:
 
-## Prohibited information
-
-The deterministic local validator runs before external extraction and before persistence. At minimum it rejects material matching dangerous classes such as:
-
-- passwords and login credentials;
-- API/access tokens;
-- banking/payment/account information;
-- government/private identity-document numbers;
-- exact home/private addresses;
-- medical or mental-health diagnoses;
-- comparable dangerous private secrets.
-
-A DM sent directly to Wilhelmina is not rejected merely because it is private. Third-party DMs Wilhelmina is not part of remain outside accessible collection scope.
-
-Adult/social character direction never converts prohibited secrets or admin-only data into comedy ammunition.
-
-## Collection policy
-
-Automatic collection is controlled separately by the runtime policy:
-
-- `off` — no automatic extraction;
-- `interaction` — eligible interaction involving Wilhelmina;
-- `ambient` — dormant future whole-server path requiring every platform/runtime gate.
-
-The default remains `off`.
-
-Phase 3 adds a separate persistent database pause/resume gate. Resuming that gate never overrides the runtime policy, and automatic extraction itself remains a later implementation phase.
-
-## v6 → v9 migration matrix
-
-Migration is idempotent and preserves existing content.
-
-| Existing v6 data | v9 result |
-|---|---|
-| ordinary memory | preserved; `privacy_class=ordinary`, `reveal_scope=cross_member`, `importance=50` |
-| `Admin note` | preserved but tightened to `restricted/admin_only` |
-| guild Discord receipt | preserved and marked `source_context=guild` |
-| admin receipt | preserved and marked `source_context=admin` |
-| memory subject/topic | backfilled into system entity rows |
-| existing summary/topic | rebuilt into local FTS index |
-| receipts/contradictions | preserved subject to existing foreign-key integrity |
-
-The migration order is deliberate:
-
-1. ensure base Registry/profile dependencies;
-2. ensure core memory tables exist;
-3. add new record columns to legacy tables;
-4. rebuild the receipt table into the v9 context-aware shape when required;
-5. create indexes that reference new columns;
-6. create/rebuild FTS and triggers;
-7. backfill subject/topic entity rows;
-8. record schema version 9.
-
-Indexes never reference v9 columns before those columns exist.
-
-## Integrity checks
-
-`check_memory_integrity()` provides a local diagnostic for:
-
-- SQLite foreign-key violations;
-- orphan/mismatched entity rows;
-- invalid contradiction relationships;
-- missing system subject/topic entities;
-- presence of the FTS structure.
-
-Tests also verify that deleting a memory removes dependent receipts, entity rows, contradiction links, and FTS searchability.
-
-## Phase 3 — Memory controls
-
-Phase 3 adds `cogs.memory_admin`, controlled by `ENABLE_MEMORY_ADMIN=true` by default. Every `/memory-admin` response is ephemeral, administrator-only, and restricted to the configured home guild.
-
-Implemented controls:
-
-- status plus integrity diagnostics;
+- status/integrity diagnostics;
 - persistent pause/resume;
-- designated Wilhelmina channel set/clear;
-- paginated private profiles;
-- record detail and receipt inspection;
-- local FTS search across explicitly selected admin-visible reveal scopes;
-- manual admin-authored add/edit/delete;
-- content-free member data inventory for current or departed members;
-- permanent member-wide Memory Ledger deletion for current or departed members with explicit confirmation.
+- designated channel set/clear;
+- private profile/detail/receipt inspection;
+- local FTS search across explicit admin-visible scopes;
+- manual add/edit/delete;
+- current/departed member data inventory;
+- current/departed member-wide Memory Ledger deletion with explicit confirmation.
 
-Single-record deletion requires `DELETE`. Member-wide Memory Ledger deletion requires `DELETE MEMBER`.
+Single-record deletion requires `DELETE`. Member-wide deletion requires `DELETE MEMBER`.
 
-Current-member commands accept a Discord member selection. Departed/archived-member variants accept a positive decimal Discord user ID string so the same data controls remain available after the member leaves the guild.
+Member-wide deletion removes subject memories plus receipts the member authored on other subjects. If deleting authored evidence leaves another memory with zero receipts, that evidence-less memory is deleted; otherwise it survives.
 
-Member-wide deletion covers both kinds of Memory Ledger data tied to the member: records where they are the subject **and receipts they authored on another subject's memory**. Cross-subject authored receipts are deleted during the purge. If removing them leaves another memory with zero receipts, that now-evidence-less memory is also deleted; if another receipt remains, the memory survives.
+The purge does not silently delete Coven Registry or private identity records.
 
-The purge deliberately does not silently delete Coven Registry or private identity/consent records. Broader member-data handling must use those feature boundaries explicitly.
+See `docs/memory_controls.md` for command details.
 
-See `docs/memory_controls.md` for the command and privacy contract.
+## Migration and rollback
 
-## Rollback notes
+### Memory Ledger v6 -> v9
 
-Do not downgrade an already-migrated production database by merely running older code against it.
+The v9 migration preserves legacy memories/receipts, adds privacy/reveal/importance/source-context fields, backfills system entities, rebuilds FTS, and keeps foreign-key integrity. `Admin note` data is tightened to `restricted/admin_only` during the schema migration because that is a deterministic invariant of the record type.
 
-Safe rollback for the v9 persistence phase is operational:
+### Extraction v10 -> v11
 
-1. stop Wilhelmina before changing database code;
-2. restore the pre-v9 SQLite backup/snapshot together with the previous application revision; or
-3. if no database rollback is needed, deploy a forward fix that continues understanding v9.
+Legacy tokenless `processing` rows are invalidated, transient text is erased, claims are cleared, and database enforcement blocks old-style processing transitions without a claim token. Old v10 workers should still be stopped/drained during rollout.
 
-The migration intentionally does not keep duplicated private-content backup tables after success. Old receipt rows are copied into the v9 table and the temporary legacy table is dropped in the same transaction managed by the caller.
+### Identity v7/v8 -> v12
 
-Phase 3 adds no schema migration. Its command surface can be rolled back by disabling `ENABLE_MEMORY_ADMIN` or deploying the previous application revision; existing v9 data and settings remain intact.
+The private identity table is transactionally rebuilt without the obsolete consent columns while preserving preferred name, full birth date, guild/user identity, and original timestamps. A failed copy rolls back to the intact legacy table.
 
-## Remaining implementation phases
+### Phase 5 context layer
 
-### Phase 4 — Automatic memory extraction
+Phase 5 has no database migration and persists no context cache/profile table. Rollback is application-only: do not wire/use the context service from the later chat brain, or deploy the previous application revision. Existing Ledger/identity/extraction data is unchanged.
 
-Discord interaction/DM event eligibility, local prohibited-data guard, strict structured OpenAI extraction, queue/backpressure, receipt/edit/delete reconciliation.
+Do not “rollback” a migrated production database by merely deploying older code. Stop Wilhelmina and restore a matching database backup with the matching application revision, or deploy a forward fix that understands the current schemas.
 
-### Phase 5 — Memory intelligence/context
+## Integrity and tests
 
-Deterministic scoring, FTS/entity retrieval, full active speaker profile loading, cross-member selection, contradiction expansion, evidence budgeting.
+`check_memory_integrity()` covers foreign-key violations, entity consistency, contradiction validity, required system entities, and FTS presence.
+
+The regression suite additionally covers:
+
+- v7/v8 identity -> v12 preservation and rollback safety;
+- v10 extraction -> v11 claim migration;
+- secret/identifier/payment/address blocking;
+- socially sensitive content permissiveness;
+- exact claim ownership and stale-worker rejection;
+- absolute TTL including provider-return boundary;
+- uncached/raw edit handling and subsecond ordering;
+- source deletion;
+- explicit-only privacy metadata mutation;
+- member-wide authored-evidence deletion;
+- content-free operational logging/auditing;
+- complete permitted speaker-profile loading;
+- owner/admin reveal-scope isolation;
+- malformed `restricted/cross_member` fail-closed behavior;
+- authorization-before-ranking;
+- referenced-member/entity retrieval;
+- FTS ordering preservation;
+- contradiction expansion/filtering;
+- wrong-guild context isolation;
+- bounded evidence with latest-edit preference;
+- retrieval-time legacy hard-secret exclusion;
+- epistemic/gossip preservation.
+
+Repository quality gates:
+
+```bash
+ruff check .
+pytest
+```
+
+## Current and next implementation stages
+
+### Phase 5 — Memory intelligence/context — current work
+
+Authorization-first scoring, full active-speaker profile loading, FTS/entity cross-member selection, contradiction expansion, evidence budgeting, retrieval-time hard-secret defense, and prompt-ready epistemic rendering are implemented in the current stacked Phase-5 branch and remain subject to exact-head CI/review before any merge.
 
 ### Phase 6 — Wilhelmina chat brain
 
-Designated server chat, fully memory-aware DM confessional mode, direct responses, selective spontaneous interjections, adult persona/evals.
+Designated server chat and memory-aware direct interaction surfaces using the approved retrieval context.
 
-### Phase 7 — Hardening and dormant ambient path
+### Phase 7 — Hardening / deployment / dormant ambient path
 
-Adversarial/privacy regressions, reconnect/rate-limit testing, observability/rollback controls, and the ambient whole-server path kept disabled until every required gate is satisfied.
+Deployment, backups, monitoring, live validation, reconnect/rate-limit/adversarial testing, and any broader listening path only after its separate product/platform decision.

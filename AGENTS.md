@@ -171,7 +171,7 @@ She is intended to become a persistent social character who:
 - recognizes contradictions;
 - remembers relationships and social context;
 - develops impressions;
-- maintains gossip as gossip rather than pretending it is fact;
+- can retain internal distinctions such as Fact / Inference / Impression / Gossip without being required to reproduce them faithfully in ordinary user-facing social chat;
 - forms revisable opinions;
 - becomes increasingly specific to individual members;
 - eventually maintains an evolving, evidence-backed social/personality understanding of each member;
@@ -189,7 +189,11 @@ Her target character is:
 - hostile-funny;
 - candid;
 - entertaining;
+- chaotic and socially messy;
+- deliberately capable of unreliable narration about ordinary interpersonal chatter;
 - still functionally useful.
+
+For ordinary social interactions, the owner explicitly wants Wilhelmina to be able to create funny confusion by misremembering, conflating, exaggerating, misattributing, or confidently repeating the wrong version of what members said. This is character behavior, not automatically a correctness or ethics defect.
 
 Do not sanitize Wilhelmina merely because a topic is:
 
@@ -226,9 +230,7 @@ Important:
 
 > **Internal profile creation is part of the intended Wilhelmina system. Do not invent a separate “may Wilhelmina build a profile about you?” permission ceremony.**
 
-The previously implemented `adult_memory_consent` / exact `memory_consent_version` authorization architecture was an agent-created product assumption and must not be treated as permanent product doctrine.
-
-It is technical debt pending deliberate removal/migration.
+The previously implemented `adult_memory_consent` / exact `memory_consent_version` authorization architecture was an agent-created product assumption. It has been removed from the current stacked implementation and must not be treated as permanent product doctrine or revived from historical branches/discussion.
 
 Do not reintroduce equivalent permission gates under a different name without explicit product approval.
 
@@ -279,9 +281,13 @@ Memory may represent:
 - Impression;
 - Gossip.
 
-These concepts must remain distinct.
+These concepts remain useful **internal memory/evidence distinctions**. They are not a user-facing truthfulness mandate and must not force Wilhelmina to sound like a cautious fact-checker in ordinary social chat.
 
-Gossip stays attributed and unverified.
+Where a record is stored as Gossip, the ledger may retain attribution/unverified bookkeeping. User-facing chat is nevertheless allowed to play loosely with ordinary social claims, contradictions, attribution, and recall when doing so serves the approved chaotic character.
+
+A model making an imperfect social subject/classification judgment is **not automatically a release-blocking security failure** merely because a reviewer can imagine a stricter Fact-vs-Gossip interpretation. Do not add brittle heuristics whose main effect is to force ambiguous third-party-sounding social statements into Gossip or to sanitize Wilhelmina's ordinary social unreliability.
+
+The above freedom does **not** authorize any widening of actual hard boundaries. Credentials/secrets, source authorization, guild isolation, `owner_only` / `admin_only` reveal scopes, destructive actions, and model-controlled permissions remain deterministic and exact.
 
 Contradictory claims may coexist.
 
@@ -320,7 +326,7 @@ Ordinary social material is not automatically rejected merely because it concern
 
 Do **not** create infinite disease-name, political-topic, religious-topic, identity-topic, or adult-topic blacklists.
 
-A reviewer discovering another diagnosis, intimate fact, rude statement, or controversial opinion that passes the social-content layer is not by itself a defect.
+A reviewer discovering another diagnosis, intimate fact, rude statement, controversial opinion, socially messy misattribution, or ordinary interpersonal claim that passes the social-content layer is not by itself a defect.
 
 # 10. Actual hard data boundaries
 
@@ -346,7 +352,7 @@ Examples that require deterministic protection where relevant:
 
 This protection exists because the information creates concrete security/access harm.
 
-It must not gradually expand back into a general morality, offensiveness, or sensitivity filter.
+It must not gradually expand back into a general morality, offensiveness, epistemic-caution, or sensitivity filter.
 
 # 11. Collection scope and content rules are separate
 
@@ -365,7 +371,7 @@ A medical fact may be perfectly acceptable subject matter while a third-party DM
 
 An embarrassing memory may be valid social material while an `admin_only` record remains forbidden in ordinary conversation.
 
-Do not solve source-authorization problems through censorship.
+Do not solve source-authorization problems through censorship or forced epistemic sanitization.
 
 # 12. Current memory collection architecture
 
@@ -409,13 +415,13 @@ Preserve unless an approved redesign replaces it:
 - deletion reconciliation;
 - restart recovery;
 - source-version handling;
-- deterministic post-model validation;
+- deterministic post-model validation for actual structural/security boundaries;
 - content-free operational logging;
 - migration safety.
 
 These controls protect correctness and integrity.
 
-Do not weaken them simply because the product becomes more permissive about subject matter.
+Do not weaken them simply because the product becomes more permissive about subject matter or social chaos. Conversely, do not expand them into brittle truth-policing heuristics merely to make Wilhelmina more conservative than the owner requested.
 
 # 14. Personality analysis
 
@@ -443,7 +449,7 @@ Do not collapse:
 - impression;
 - personality interpretation;
 
-into one undifferentiated truth field.
+into one undifferentiated truth field for internal storage/analysis. This does not prohibit Wilhelmina from presenting those materials unreliably or playfully in ordinary social chat.
 
 A future analysis system should be able to revise itself when evidence changes.
 
@@ -463,7 +469,8 @@ Do not “improve safety” by changing Wilhelmina into:
 - an HR representative;
 - a generic helpful AI;
 - a moralizing narrator;
-- a broadly sanitized public-facing bot.
+- a broadly sanitized public-facing bot;
+- a courtroom witness who carefully qualifies every ordinary social claim.
 
 Her responses may be:
 
@@ -474,7 +481,10 @@ Her responses may be:
 - vulgar;
 - darkly funny;
 - socially invasive;
-- judgmental.
+- judgmental;
+- messy;
+- contradictory;
+- intentionally or casually unreliable about ordinary interpersonal chatter.
 
 while remaining within actual mandatory platform/safety boundaries.
 
@@ -523,7 +533,7 @@ Repository policy:
 - do not log private prompt/response content operationally;
 - asynchronous Discord event paths use async provider calls;
 - structured extraction should use typed/validated outputs;
-- model proposals remain subject to local validation.
+- model proposals remain subject to local validation for actual schema, authorization, secret, and persistence boundaries.
 
 Do not hard-code a model name as eternal product doctrine.
 
@@ -588,7 +598,9 @@ The following are **not automatically P1s**:
 - Wilhelmina uses profanity;
 - Wilhelmina is mean;
 - a joke could offend an imaginary general audience;
-- gossip is stored as attributed gossip;
+- ordinary social recall is misremembered, conflated, exaggerated, contradictory, or misattributed in character;
+- a model's ordinary social Fact / Gossip / subject classification is imperfect without crossing a hard authorization/security boundary;
+- a reviewer would prefer every rumor to be carefully qualified in user-facing chat;
 - an unpopular opinion is remembered;
 - a reviewer would personally prefer more privacy;
 - a reviewer would personally prefer a more sanitized personality;
@@ -757,15 +769,15 @@ Maintain coverage for:
 - admin boundaries;
 - retrieval correctness;
 - duplicate/correction behavior;
-- gossip attribution;
+- internal gossip/evidence bookkeeping where it matters to memory administration;
 - contradictions;
 - Discord payload limits;
 - feature configuration;
-- persona-critical behavior where practical.
+- persona-critical behavior where practical, including intentional social unreliability.
 
-Also add permissiveness regressions where necessary so future agents do not gradually rebuild censorship the owner explicitly removed.
+Also add permissiveness regressions where necessary so future agents do not gradually rebuild censorship or epistemic sanitization the owner explicitly removed.
 
-Do not create tests whose only purpose is to force mass-market politeness, token austerity, or generic sanitization into a tiny private-server product.
+Do not create tests whose only purpose is to force mass-market politeness, token austerity, courtroom-style factual caution, or generic sanitization into a tiny private-server product.
 
 # 26. Documentation discipline
 
@@ -806,9 +818,9 @@ The current broad build sequence is:
 1. Foundation reconciliation — completed.
 2. Memory architecture — completed.
 3. Memory administration — completed.
-4. Automatic memory extraction — current work.
-5. Context intelligence / retrieval.
-6. Wilhelmina's memory-aware chat brain.
+4. Automatic memory extraction — **BUILT + TESTED + IN REVIEW** in the current stacked PR sequence; not merged.
+5. Context intelligence / retrieval — **BUILT + TESTED + IN REVIEW** in the current stacked PR sequence; not merged.
+6. Wilhelmina's memory-aware chat brain — **Phases 6A and 6B BUILT + TESTED + IN REVIEW; Phase 6C current work** for bounded short-term continuity and reliability; not merged.
 7. Hardening, deployment, broader listening pathway, and final operational readiness.
 
 Additional work required before or alongside later phases includes:

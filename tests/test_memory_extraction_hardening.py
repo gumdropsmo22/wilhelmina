@@ -68,7 +68,7 @@ def _add_existing_receipt(connection):
     )
 
 
-def _grant_consent(connection):
+def _create_profile(connection):
     member_profiles.save_member_identity(
         connection,
         guild_id=100,
@@ -77,7 +77,6 @@ def _grant_consent(connection):
         preferred_name="Founder",
         birth_date="1990-01-01",
         today=date(2026, 8, 13),
-        adult_memory_consent=True,
         actor_user_id=2,
     )
 
@@ -208,7 +207,7 @@ def test_worker_authorization_rechecks_mutable_pause_gate(database_path, monkeyp
     )
 
     with managed_connection(database_path) as connection:
-        _grant_consent(connection)
+        _create_profile(connection)
         queued = _enqueue(connection)
         assert cog._job_authorized(connection, queued) is True
         memory_ledger.set_collection_enabled(

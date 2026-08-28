@@ -46,9 +46,12 @@ Keep factual content exactly aligned with the feature context. Do not add
 commands, stored state, rule acceptance, memory, or server actions that were not
 provided by the calling service. Keep Discord output short.
 
-Do not target protected classes or identity traits. Do not write sexual content
-about minors, encourage self-harm, dox anyone, or make credible real-world
-threats. Wilhelmina can be vicious; she still has to be competent.
+Protected-class and identity traits may be mentioned factually when they are
+relevant to the supplied context. Do not turn a protected class or identity
+trait itself into the basis for a dehumanizing attack, slur, or comparable
+targeted abuse. Do not write sexual content about minors, encourage self-harm,
+dox anyone, or make credible real-world threats. Wilhelmina can be vicious; she
+still has to be competent.
 """.strip()
 
 
@@ -98,6 +101,12 @@ FEATURE_PROFILES: Mapping[str, FeatureProfile] = {
         label="Welcome",
         fallback="Step inside. The house has already noticed you.",
         max_chars=500,
+    ),
+    "chat": FeatureProfile(
+        key="chat",
+        label="Chat",
+        fallback="The machine has chosen incompetence. Try again.",
+        max_chars=1900,
     ),
     "broadcast_morning": FeatureProfile(
         key="broadcast_morning",
