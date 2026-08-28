@@ -818,9 +818,9 @@ The current broad build sequence is:
 1. Foundation reconciliation — completed.
 2. Memory architecture — completed.
 3. Memory administration — completed.
-4. Automatic memory extraction — **BUILT + TESTED + IN REVIEW** in the current stacked PR sequence; not merged.
-5. Context intelligence / retrieval — **BUILT + TESTED + IN REVIEW** in the current stacked PR sequence; not merged.
-6. Wilhelmina's memory-aware chat brain — **Phases 6A and 6B BUILT + TESTED + IN REVIEW; Phase 6C current work** for bounded short-term continuity and reliability; not merged.
+4. Automatic memory extraction — **MERGED** into `main`.
+5. Context intelligence / retrieval — **MERGED** into `main`.
+6. Wilhelmina's memory-aware chat brain — **Phases 6A–6C MERGED** into `main`; **Phase 6D BUILT + TESTED + IN REVIEW** for hostile hardening; Phase 6E live rollout/behavioral validation remains next.
 7. Hardening, deployment, broader listening pathway, and final operational readiness.
 
 Additional work required before or alongside later phases includes:
