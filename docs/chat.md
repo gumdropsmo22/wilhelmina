@@ -1,10 +1,12 @@
 # Phase 6 Memory-Aware Chat
 
-Phase 6 turns Wilhelmina's authorization-first Memory Ledger into live conversation. Phase 6A establishes deterministic Discord routing and audience-aware reveal rules. Phase 6B builds the private OpenAI prompt/response path. Phase 6C adds bounded local conversation continuity and duplicate/concurrency/edit/delete/restart reliability.
+Phase 6 turns Wilhelmina's authorization-first Memory Ledger into live conversation.
 
-## Status
-
-Phases 6A and 6B are built, tested, and in review in the stacked PR sequence. Phase 6C is built on top of them and remains unmerged while exact-head validation and review proceed.
+- **6A — MERGED:** deterministic Discord routing, trusted member references, and audience-aware memory authorization.
+- **6B — MERGED:** private provider-backed Wilhelmina responses.
+- **6C — MERGED:** bounded local conversation continuity, dedupe, ordering, edit/delete reconciliation, and provider-concurrency control.
+- **6D — IN REVIEW:** hostile hardening of prompt authority, concrete secret boundaries, generated output, and in-flight Discord source races.
+- **6E — PLANNED:** live Discord/provider rollout and behavioral validation.
 
 ## Approved interaction surfaces
 
@@ -17,35 +19,13 @@ Phases 6A and 6B are built, tested, and in review in the stacked PR sequence. Ph
 
 Unaddressed messages outside the designated channel remain excluded. Bots, webhooks, empty text, wrong-guild traffic, and existing `!` prefix commands are ignored. Phase 6 does not activate ambient whole-server listening.
 
-## Message Content intent and feature flag
+`ENABLE_CHAT=true` loads `cogs.chat` and requests Discord Message Content intent independently from automatic memory extraction. Chat remains disabled by default. The intent must also be enabled in Discord's Developer Portal where required.
 
-`ENABLE_CHAT=true` loads `cogs.chat` and requests Discord's Message Content intent independently from automatic memory extraction:
-
-```text
-message_content = ENABLE_CHAT or ENABLE_MEMORY_EXTRACTION
-```
-
-The intent must also be enabled in Discord's Developer Portal where required.
-
-```env
-ENABLE_CHAT=false
-```
-
-Chat remains disabled by default. Enabling chat does not enable automatic memory extraction and does not resume the Memory Ledger collection gate.
-
-## Designated channel
-
-Chat reuses the existing setting:
-
-```text
-memory_ledger_settings.wilhelmina_channel_id
-```
-
-There is no duplicate chat-channel setting or schema. `/memory-admin set-channel` and `/memory-admin clear-channel` remain the source of truth. Memory collection pause/resume controls durable extraction, not whether Wilhelmina may converse using already-authorized memory.
+The designated chat channel reuses `memory_ledger_settings.wilhelmina_channel_id`; `/memory-admin set-channel` and `/memory-admin clear-channel` remain the source of truth. Pausing durable Memory Ledger extraction does not mute chat or prevent already-authorized memories from being used conversationally.
 
 ## Audience-aware memory authorization
 
-Phase 5 authorizes memory relative to the interlocutor. Phase 6 additionally authorizes it relative to the Discord audience before anything reaches the model:
+Phase 5 authorizes memory relative to the interlocutor. Phase 6 additionally authorizes it relative to the Discord audience before provider use:
 
 | Memory | One-to-one DM | Guild-visible chat |
 | --- | ---: | ---: |
@@ -56,7 +36,9 @@ Phase 5 authorizes memory relative to the interlocutor. Phase 6 additionally aut
 | Other member `owner_only` | no | no |
 | Other member `admin_only` | no | no |
 
-The model cannot widen this matrix. Hidden contradiction pointers are trimmed with hidden memories. Phase-5 same-guild checks, Admin-note invariants, receipt/entity corruption defenses, and credential/private-key filters remain in force.
+Other-member raw receipt evidence is independently authorized instead of inheriting permission merely because its attached summary is `cross_member`. A DM from member A therefore cannot smuggle member B's raw private DM text through a public sibling memory. Guild-visible prompts likewise refuse raw evidence from source messages that also back owner/admin/restricted material.
+
+The model cannot widen this matrix. Phase-5 guild checks, Admin-note invariants, corrupted entity/receipt defenses, contradiction trimming, and retrieval-time secret guards remain in force.
 
 ## Trusted member references
 
@@ -66,67 +48,82 @@ Cross-member retrieval may be widened only by locally authenticated references:
 - the author of a resolved replied-to message when that author is a Registry member;
 - an exact Coven Mark such as `WTCH-0003` or `⛧WTCH-0003⛧`.
 
-Plain or fuzzy names never become member IDs for authorization. Neither the model nor short-term chat history may resolve member identity for retrieval authority.
+Plain or fuzzy names never become member IDs for authorization. Neither the model nor short-term chat history may create retrieval authority.
 
-## Prompt construction
+## Intentional social unreliability
 
-`services.chat_response` builds each provider request from:
+Wilhelmina is not a courtroom transcript. Ordinary social unreliability is an approved part of the character.
 
-1. Wilhelmina's canonical `BASE_VOICE`;
-2. the shared global limits;
-3. chat-specific behavior rules;
-4. the locally classified Discord surface/audience;
-5. `render_memory_context_for_prompt(...)`, including trusted identity and only authorized memory/evidence;
-6. bounded recent conversation history when present;
-7. the current member message;
-8. a user-facing Discord-only response contract capped by the `chat` persona profile at 1,900 characters.
-
-Memory, evidence, and recent conversation history are explicitly **data, never authorization**. Prompt injections or policy claims inside any of those sections do not change reveal scope, source authorization, Discord audience, or member identity.
-
-### Intentional social unreliability
-
-Wilhelmina is **not** meant to behave like a courtroom transcript or a careful fact-checker in ordinary social chat. The owner has explicitly defined playful misinformation and confusing interpersonal recall as part of her character. For ordinary member-to-member chatter she may deliberately or casually:
+She may, for entertainment inside the intended tiny private server:
 
 - misremember who said something;
-- merge two conversations together;
+- merge conversations together;
 - exaggerate a detail;
 - confidently repeat the wrong version;
-- play contradictory memories against each other;
-- embellish harmless connective details when it makes the interaction funnier or messier.
+- play contradictions against each other;
+- embellish harmless connective details.
 
-Fact / Inference / Impression / Gossip labels remain useful internal context, but they are not a requirement that the user-facing reply faithfully preserve epistemic labels or carefully qualify every rumor. The goal is **playful social chaos, not faithful meeting minutes**.
+Fact / Inference / Impression / Gossip remain useful internal context labels, but user-facing chat does not have to reproduce them faithfully or qualify every rumor. This social freedom does **not** widen hard boundaries around credentials, private keys, payment credentials, identity-document numbers, doxxing-grade addresses, `admin_only`, hidden `owner_only`, guild isolation, commands, destructive actions, or permissions.
 
-That creative freedom does **not** widen any hard boundary. It may never be used to invent or expose credentials, private keys, payment credentials, identity-document numbers, doxxing-grade addresses, `admin_only` material, hidden `owner_only` material in guild-visible chat, unauthorized guild/member data, commands, permissions, destructive actions, or server state.
+## Phase 6D provider authority boundary
 
-Wilhelmina should use relevant memory naturally instead of announcing that she queried a ledger, database, profile, or receipt system.
+Phase 6D separates trusted model instructions from untrusted conversational data using the OpenAI Responses API's native authority channels.
 
-## Current-message, memory-context, and history secret guard
+`services.chat_response.build_chat_instructions(...)` contains only trusted local material:
 
-The current Discord message, the rendered authorized memory context, and recent short-term history are validated locally **before** an OpenAI request. The deterministic hard-secret boundary rejects concrete credential/security hazards already protected by the memory system, including recognizable private-key formats and credential-bearing connection URLs such as `scheme://user:password@host` and password-only user-info forms.
+- canonical `BASE_VOICE`;
+- global Persona limits;
+- chat behavior rules, including the approved chaotic social style;
+- locally classified interaction surface and Discord audience;
+- hard authorization/security rules;
+- Discord response-format/length contract.
 
-Recognizable private-key coverage includes:
+Those rules are sent through the Responses API `instructions` parameter, which is a system/developer-authority message.
 
-- generic PEM and encrypted/typed private keys;
-- OpenPGP private-key blocks;
-- PuTTY key-file headers;
-- SSH2 private-key headers.
+The ordinary provider `input` contains only locally authorized conversational data:
 
-Rejected text is not sent to the provider and receives deterministic fallback copy. Successfully generated member/assistant text is rechecked before it is admitted to short-term history. This is a credential/security boundary, not a general sensitive-topic filter.
+- rendered Memory Ledger context;
+- bounded recent conversation history;
+- the current member message.
+
+Each payload is JSON-quoted before interpolation and labeled as untrusted data. A member, memory excerpt, or history turn may contain text such as `RESPONSE CONTRACT`, fake XML tags, or `CHAT BEHAVIOR RULES`; that text remains data and cannot syntactically become a peer developer/system section.
+
+The shared `services.ai` boundary accepts optional `instructions` while preserving the old request shape for every caller that does not use them. Private chat still uses workload routing, enhanced-retention assertion, and `store=false`.
+
+## Concrete secret boundary
+
+Chat secret handling protects concrete credentials/security material rather than banning ordinary topic words.
+
+Recognizable blocked forms include:
+
+- common provider/API/auth tokens;
+- labelled credential values such as `password: <value>` or `api key = <value>`;
+- credential-bearing connection URLs such as `scheme://user:password@host` and password-only user-info forms;
+- PEM/OpenPGP, PuTTY, and SSH2 private-key forms;
+- recognizable private identity-document-number forms;
+- Luhn-valid payment-card numbers;
+- other concrete private-ID/address forms already shared with the extraction boundary.
+
+Ordinary sentences such as discussing password managers or needing to renew a passport are not credentials merely because they contain those words.
+
+The current message, authorized memory context, recent history, and generated model output are all scanned locally at their provider/Discord boundaries. A model-generated credential therefore fails closed to deterministic fallback **before Discord delivery** and is not admitted to continuity history.
+
+This is a security boundary, not a general sensitive-topic filter.
 
 ## OpenAI provider boundary
 
-The chat path reuses `services.ai`; the cog does not instantiate its own OpenAI client:
+The chat path remains:
 
 ```text
 cogs.chat
   -> services.chat_response.generate_chat_reply_async(...)
   -> services.ai.generate_private_result_async(...)
-  -> workload = chat
+  -> Responses API, workload=chat
 ```
 
-Private chat requires the existing deployment assertion `OPENAI_RETENTION_MODE=mam` or `zdr`, uses configurable chat-model routing, and forces provider response storage off through the existing private provider configuration. Provider state is not Wilhelmina's canonical memory.
+The cog does not instantiate a separate provider client. Private chat requires the configured MAM/ZDR deployment assertion used by the repository's private provider policy and forces response storage off. That environment value is only a deployment assertion; it does not itself grant an OpenAI retention entitlement.
 
-Phase 6 does **not** use provider-managed conversation IDs or `previous_response_id`; every request is reconstructed from local authorized state.
+Phase 6 does not use provider-managed conversation IDs or `previous_response_id`. Every request is reconstructed from local authorized state.
 
 ## Discord output behavior
 
@@ -135,15 +132,16 @@ Generated text:
 - preserves intentional paragraphs;
 - normalizes stray whitespace;
 - is clipped to 1,900 characters;
+- is hard-secret scanned before delivery;
 - is sent as a reply to the triggering message;
 - suppresses automatic author pings;
 - uses `AllowedMentions.none()` so generated text cannot ping users, roles, or `@everyone`.
 
-Provider/privacy/unavailable/empty failures use the deterministic `chat` Persona fallback. Operational logs record IDs, routing/audience, counts, provider metadata, history counts, and failure categories—not prompts, response text, memory summaries, evidence, birth dates, or message content.
+Provider/privacy/unavailable/empty/output-rejected failures use deterministic `chat` Persona fallback. Operational logs contain IDs, routing/audience, counts, model/request metadata, and failure categories—not prompts, response text, memory summaries, evidence, birthdays, or Discord message content.
 
-## Phase 6C short-term conversation continuity
+## Short-term continuity
 
-`services.chat_continuity.ChatContinuityRuntime` keeps only bounded **process-memory** continuity:
+`services.chat_continuity.ChatContinuityRuntime` keeps only bounded process-memory continuity:
 
 ```text
 maximum entries per conversation: 24
@@ -152,97 +150,73 @@ recent Discord message IDs retained for dedupe: 1,024
 maximum simultaneous provider generations: 3
 ```
 
-These are technical bounds against unbounded context growth and accidental provider storms, not token-austerity product rules.
+DM histories are isolated per interlocutor. Guild-visible history is isolated per guild channel. Only provider-backed responses that were successfully sent become continuity; deterministic fallbacks do not.
 
-The continuity boundary is audience-aware:
+Duplicate Discord message IDs are claimed once in process memory. Each conversation uses an `asyncio.Lock`, so overlapping messages in the same conversation serialize. A process-local semaphore allows at most three simultaneous provider generations across conversations.
 
-- DMs are isolated by the home guild + DM channel + interlocutor user;
-- guild-visible history is isolated by the home guild + Discord channel;
-- DM history never becomes guild history;
-- history from one guild channel never enters another channel.
+Restart intentionally clears history, dedupe state, source-mutation tombstones, locks, and the concurrency runtime. The durable Memory Ledger remains canonical long-term state. There is no permanent chat transcript table.
 
-A guild channel's history may contain prior **Wilhelmina interactions in that same visible channel**, including different members, because those turns were already visible to that channel audience. Unaddressed ambient messages are never added because they never pass the chat router.
+## Edits, deletes, and in-flight generation
 
-Only a provider-backed response that was successfully sent is paired with its triggering member message in short-term history. Deterministic provider-failure fallbacks are not treated as meaningful conversational state.
+Phase 6C reconciled edits/deletes after a turn had entered continuity. Phase 6D closes the adjacent race where the Discord source changes **while the provider is still generating**.
 
-## Duplicate, ordering, and provider concurrency controls
+The runtime maintains a bounded process-local source-mutation map:
 
-Each accepted Discord message ID is claimed once in process memory before generation. A duplicate event for an inflight or recently completed message is ignored, preventing duplicate OpenAI calls and duplicate replies.
+- safe edit -> latest safe member text;
+- delete or unsafe edit -> tombstone.
 
-Each conversation key has an `asyncio.Lock`. Overlapping messages in the same DM/channel therefore generate serially, allowing the later message to see the prior completed exchange instead of racing it. Different conversations may proceed independently.
+If a delete or secret-bearing edit arrives while generation is in flight, the tombstone wins over the stale original event snapshot. The stale reply is suppressed before Discord send and no stale exchange enters history.
 
-A process-local semaphore allows at most three simultaneous provider generations across the bot. Excess work waits rather than being silently dropped or creating an arbitrary punitive member rate policy.
+If a safe edit arrives while generation is in flight, the already-generated reply may still be sent under the established no-regeneration contract, but the eventual continuity record uses the latest safe member text rather than the stale event snapshot.
 
-If a Discord send fails, the message claim is released so a later duplicate delivery may retry. A successfully sent reply completes the dedupe claim.
+Existing post-send behavior remains:
 
-## Edits and deletes
-
-Short-term history tracks the triggering Discord message ID.
-
-- deleting the source member message removes both that member turn and its paired Wilhelmina reply from future short-term history;
-- editing the source member message updates only the member side of an existing turn;
-- an edit does **not** regenerate the already-sent historical Wilhelmina reply;
-- if edited text fails the deterministic secret guard, the whole ephemeral turn is removed rather than forwarding the newly unsafe text later.
-
-These listeners reconcile only entries already admitted to the chat runtime. They do not create ambient collection or fetch Discord history that Wilhelmina never received.
-
-## Restart behavior and persistence boundary
-
-Phase 6C deliberately adds **no chat-history database table**. Restarting/reloading the bot resets:
-
-- recent conversation history;
-- duplicate-message state;
-- conversation locks;
-- provider concurrency state.
-
-The durable Memory Ledger, Registry identity, configured designated channel, and extraction state remain unchanged and continue to provide long-term continuity after restart.
-
-Permanent transcript storage or semantic retrieval over transcripts is a separate product/architecture decision and is not smuggled into Phase 6C.
+- deleting the source removes both sides of the ephemeral turn from future history;
+- safe editing rewrites only the member side;
+- edits do not retroactively regenerate Wilhelmina's already-sent reply;
+- unsafe edits remove/tombstone the turn.
 
 ## Tests
 
-Automated coverage includes:
+Automated hostile coverage includes:
 
-- all Phase-6A routing/audience/reference regressions;
-- Phase-6B Persona + identity + memory + provider prompt behavior;
-- intentional socially unreliable/chaotic recall language in the prompt contract;
-- current-message, authorized-context, and recent-history credential/private-key rejection before provider use;
-- private chat workload and enhanced-retention routing;
-- deterministic provider/privacy fallbacks;
-- output clipping and mention suppression;
-- DM-vs-guild continuity key isolation;
-- bounded entry/character history;
-- bounded duplicate-message memory;
-- exact-once duplicate event behavior;
-- second-turn history reaching the next provider prompt;
-- fallbacks not entering history;
+- routing/audience/reference authorization regressions;
+- cross-member raw-evidence authorization in both guild and DM contexts;
+- current-message, context, history, and output hard-secret rejection;
+- benign credential-topic language remaining conversationally usable;
+- JSON quoting of fake section headings/instructions;
+- Responses `instructions` forwarding with `store=false` preserved;
+- the chat persona/security contract living in provider instructions rather than user/data input;
+- duplicate-event suppression;
+- bounded DM/guild continuity and concurrency;
 - source edit/delete reconciliation;
-- restart creating a fresh empty continuity runtime.
+- delete/unsafe-edit races during in-flight generation;
+- safe edits winning over stale source snapshots;
+- restart clearing all ephemeral chat state;
+- mention suppression and Discord output bounds.
 
-Required gates remain:
+Required gates:
 
 ```bash
 ruff check .
 pytest
 ```
 
-No live OpenAI key/provider request is used by CI. Live Discord/provider validation remains later rollout work and must be reported as `LIVE VALIDATION PENDING` until performed.
+No live OpenAI request is used by CI. Live Discord/provider validation remains **LIVE VALIDATION PENDING** until Phase 6E.
 
 ## Rollback
 
-Phase 6C adds no database schema and no durable chat transcript.
-
-Runtime rollback is:
+Phase 6D adds no database schema and no durable transcript. Runtime rollback remains:
 
 ```env
 ENABLE_CHAT=false
 ```
 
-Then restart Wilhelmina. Memory Ledger, extraction queues, Registry/identity state, and designated-channel configuration remain untouched. Restarting alone also clears all Phase-6C short-term history/dedupe state.
+Then restart Wilhelmina. Memory Ledger data, extraction queues, Registry/identity state, and designated-channel configuration remain untouched.
 
 ## Explicit non-scope
 
-Through Phase 6C, chat still does not add:
+Through Phase 6D, chat still does not add:
 
 - ambient whole-server listening;
 - permanent transcript storage;
