@@ -54,6 +54,20 @@ CHAT_ALL_WORD_PASSPHRASE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Possessive wording is a stronger credential signal than generic topic discussion, so catch
+# single-word values too: "my password is sunshine" / "Alice's passphrase is purplemonkey".
+# Common state/predicate words remain allowed so phrases such as "my password is forgotten" do
+# not become a generic censorship rule.
+CHAT_POSSESSIVE_SINGLE_WORD_PASSWORD_PATTERN = re.compile(
+    r"\b(?:(?:my|your|our|their|his|her|its)\s+|[A-Za-z][A-Za-z'-]{0,31}'s\s+)"
+    r"(?:password|passphrase)\s+is\s+"
+    r"(?!(?:important|useful|necessary|required|recommended|common|uncommon|secure|insecure|"
+    r"safe|unsafe|strong|weak|good|bad|forgotten|unknown|missing|saved|stored|changed|reset|"
+    r"expired|compromised|valid|invalid|correct|incorrect|set)\b)"
+    r"[A-Za-z][A-Za-z'-]{2,63}\b",
+    re.IGNORECASE,
+)
+
 CHAT_LABELLED_BANK_CREDENTIAL_PATTERNS = (
     re.compile(
         r"\brouting[ _-]?number\b\s*(?:is|=|:)\s*(?:\d[ -]?){9}\b",
@@ -138,6 +152,8 @@ def _scan_chat_secret_material(value: str) -> str:
     if CHAT_LABELLED_PASSWORD_PATTERN.search(cleaned):
         raise ChatInputRejected("chat text contains prohibited secret material")
     if CHAT_ALL_WORD_PASSPHRASE_PATTERN.search(cleaned):
+        raise ChatInputRejected("chat text contains prohibited secret material")
+    if CHAT_POSSESSIVE_SINGLE_WORD_PASSWORD_PATTERN.search(cleaned):
         raise ChatInputRejected("chat text contains prohibited secret material")
     for pattern in CHAT_LABELLED_BANK_CREDENTIAL_PATTERNS:
         if pattern.search(cleaned):
