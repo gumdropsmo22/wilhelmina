@@ -9,6 +9,8 @@ from services import chat_response
     "secret",
     [
         "password is hunter 2",
+        "password is correct horse battery staple",
+        "Alice's password is blue meadow silver lantern",
         "my password is correct horse battery staple",
         "passphrase: correct horse battery staple",
         "routing number: 021000021",
@@ -32,6 +34,7 @@ def test_labelled_multitoken_and_banking_credentials_fail_closed(secret):
     [
         "Password managers are useful.",
         "A password is important for account security.",
+        "A password is useful when an account matters.",
         "I forgot whether the bank calls it a routing number or sort code.",
         "What does CVV mean on a payment card?",
         "I need to renew my passport next year.",
