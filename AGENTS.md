@@ -62,9 +62,13 @@ The small scale does **not** justify:
 - ignoring required platform rules;
 - or building technically unsafe systems.
 
+Security and privacy work must also be **proportionate to the actual deployment**. This is a tiny private server, not a bank, hospital, public social platform, or enterprise compliance product.
+
+Do not repeatedly hold releases for increasingly theoretical personal-data formatting edge cases merely because a hostile reviewer can invent another representation. Fix concrete credential, authorization, integrity, and platform failures. Do not build a generalized PII/DLP product unless the owner explicitly asks for one or an actual external requirement makes it mandatory.
+
 The rule is:
 
-> **Small private product = optimize for personality, usefulness, continuity, and owner intent — not generic mass-market sanitization.**
+> **Small private product = optimize for personality, usefulness, continuity, and owner intent — not generic mass-market sanitization or security theater.**
 
 # 2. Token usage and model-cost philosophy
 
@@ -330,29 +334,35 @@ A reviewer discovering another diagnosis, intimate fact, rude statement, controv
 
 # 10. Actual hard data boundaries
 
-Continue to treat actual security/privacy hazards differently from ordinary sensitive conversation.
+Continue to treat **concrete security/access hazards** differently from ordinary sensitive or personal conversation.
 
-Examples that require deterministic protection where relevant:
+The practical hard boundary for this tiny private deployment is deliberately narrow. Deterministically protect where relevant:
 
-- passwords;
-- passphrases;
+- passwords and passphrases when they are actually presented as credential values;
 - authentication secrets;
 - private keys;
 - API keys;
 - access/auth/refresh tokens;
-- payment-card credentials;
-- account-routing credentials;
-- CVV-style secrets;
-- exact private identity-document numbers;
-- doxxing-grade private/home addresses;
+- payment-card credentials and CVV-style secrets;
 - admin-only records outside the admin surface;
 - sources Wilhelmina was never actually given access to;
 - secrets in operational logs;
-- destructive model-controlled database actions.
+- destructive model-controlled database actions;
+- guild/reveal-scope authorization.
 
-This protection exists because the information creates concrete security/access harm.
+Do **not** turn this list into a generalized personal-information loss-prevention engine.
 
-It must not gradually expand back into a general morality, offensiveness, epistemic-caution, or sensitivity filter.
+In particular, names, birthdays, social history, embarrassing facts, ordinary addresses or identity-related discussion, gossip, relationships, and other personal information in this known private server are **not automatically release-blocking privacy defects** merely because a reviewer can invent another textual representation.
+
+Existing simple safeguards for unusually risky identity numbers or private addresses may remain, but agents must **not** keep widening regexes, adding complex PII taxonomies, or holding releases for theoretical SSN/address formatting gaps unless:
+
+1. the owner explicitly requests comprehensive PII scrubbing;
+2. the data creates an actual credential/access risk in the implemented flow; or
+3. a verified binding external/platform requirement requires it.
+
+This protection exists to prevent concrete harm, not to make the bot look compliant.
+
+It must not gradually expand back into a general morality, offensiveness, epistemic-caution, sensitivity, or enterprise-privacy filter.
 
 # 11. Collection scope and content rules are separate
 
@@ -574,15 +584,15 @@ If research conflicts with product intent:
 
 # 19. Reviewer behavior
 
-A hostile review exists to find real defects, not to invent an endlessly stricter product.
+A hostile review exists to find **real defects**, not to create an endless security/privacy escalation loop.
 
-P1 / release-blocking findings should involve things such as:
+P1 / release-blocking findings should involve concrete failures such as:
 
 - unauthorized access;
 - stale-worker mutation;
 - destructive integrity failures;
 - data loss;
-- credentials escaping security guards;
+- actual passwords/API keys/private keys/payment credentials escaping the practical security guards;
 - admin-only disclosure;
 - incorrect source authorization;
 - broken migrations;
@@ -605,9 +615,14 @@ The following are **not automatically P1s**:
 - a reviewer would personally prefer more privacy;
 - a reviewer would personally prefer a more sanitized personality;
 - a theoretical edge case contradicts no approved product requirement;
-- a feature uses more tokens than a mass-market product would prefer.
+- a feature uses more tokens than a mass-market product would prefer;
+- another possible SSN/identity-number textual format is not recognized;
+- another possible private/home-address textual format is not recognized;
+- the bot lacks comprehensive PII/DLP coverage that the owner never requested.
 
-When a review finding is based on an obsolete product assumption, update the specification/reviewer doctrine rather than repeatedly patching around the obsolete assumption.
+For privacy/security review, use **risk-proportionate stopping rules**. Once actual credentials, authorization boundaries, destructive actions, and verified platform constraints are covered with reasonable regressions, do not keep reopening the tranche merely to enumerate every conceivable PII or formatting variant.
+
+When a review finding is based on an obsolete or overbroad product assumption, update the specification/reviewer doctrine and close the finding as non-blocking rather than repeatedly patching around that obsolete assumption.
 
 # 20. Implementation workflow
 
@@ -765,7 +780,7 @@ Maintain coverage for:
 - edit races;
 - deletion;
 - source authorization;
-- secret handling;
+- practical secret handling;
 - admin boundaries;
 - retrieval correctness;
 - duplicate/correction behavior;
@@ -775,9 +790,9 @@ Maintain coverage for:
 - feature configuration;
 - persona-critical behavior where practical, including intentional social unreliability.
 
-Also add permissiveness regressions where necessary so future agents do not gradually rebuild censorship or epistemic sanitization the owner explicitly removed.
+Also add permissiveness regressions where necessary so future agents do not gradually rebuild censorship, generalized PII scrubbing, or epistemic sanitization the owner explicitly removed.
 
-Do not create tests whose only purpose is to force mass-market politeness, token austerity, courtroom-style factual caution, or generic sanitization into a tiny private-server product.
+Do not create tests whose only purpose is to force mass-market politeness, token austerity, courtroom-style factual caution, enterprise-grade PII coverage, or generic sanitization into a tiny private-server product.
 
 # 26. Documentation discipline
 
@@ -860,7 +875,7 @@ When choosing between:
 
 and
 
-**B.** inventing a more conservative, sanitized, cheap, mass-market, reviewer-friendly, conventional, or enterprise-style product;
+**B.** inventing a more conservative, sanitized, cheap, mass-market, reviewer-friendly, conventional, enterprise-style, or compliance-looking product;
 
 choose **A** unless a genuine mandatory constraint prevents it.
 
