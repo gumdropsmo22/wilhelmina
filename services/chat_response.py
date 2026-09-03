@@ -55,16 +55,28 @@ CHAT_ALL_WORD_PASSPHRASE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Possessive wording is a stronger credential signal than generic topic discussion, so catch
-# single-word values too: "my password is sunshine" / "Alice's passphrase is purplemonkey".
-# Common state/predicate words remain allowed so phrases such as "my password is forgotten" do
-# not become a generic censorship rule.
+PASSWORD_STATE_WORDS = (
+    r"important|useful|necessary|required|recommended|common|uncommon|secure|insecure|"
+    r"safe|unsafe|strong|weak|good|bad|forgotten|unknown|missing|saved|stored|changed|reset|"
+    r"expired|compromised|valid|invalid|correct|incorrect|set"
+)
+
+# Possessive wording is a strong credential signal, so catch single-word values too:
+# "my password is sunshine" / "Alice's passphrase is purplemonkey". Common state/predicate
+# words remain allowed so phrases such as "my password is forgotten" are normal conversation.
 CHAT_POSSESSIVE_SINGLE_WORD_PASSWORD_PATTERN = re.compile(
     r"\b(?:(?:my|your|our|their|his|her|its)\s+|[A-Za-z][A-Za-z'-]{0,31}'s\s+)"
     r"(?:password|passphrase)\s+is\s+"
-    r"(?!(?:important|useful|necessary|required|recommended|common|uncommon|secure|insecure|"
-    r"safe|unsafe|strong|weak|good|bad|forgotten|unknown|missing|saved|stored|changed|reset|"
-    r"expired|compromised|valid|invalid|correct|incorrect|set)\b)"
+    rf"(?!(?:{PASSWORD_STATE_WORDS})\b)"
+    r"[A-Za-z][A-Za-z'-]{2,63}\b",
+    re.IGNORECASE,
+)
+
+# Bare/definite-article assignments are also concrete enough to treat as credentials, while the
+# same state-word exclusion keeps ordinary statements like "the password is invalid" permitted.
+CHAT_BARE_SINGLE_WORD_PASSWORD_PATTERN = re.compile(
+    r"\b(?:the\s+)?(?:password|passphrase)\s+is\s+"
+    rf"(?!(?:{PASSWORD_STATE_WORDS})\b)"
     r"[A-Za-z][A-Za-z'-]{2,63}\b",
     re.IGNORECASE,
 )
@@ -138,33 +150,44 @@ class ChatProviderRequest:
     input: str
 
 
+def _secret_scan_view(value: str) -> str:
+    """Remove lightweight Discord Markdown that can hide otherwise obvious labelled secrets."""
+
+    scan_text = value.replace("`", "")
+    scan_text = scan_text.replace("**", "").replace("__", "").replace("~~", "")
+    return scan_text
+
+
 def _scan_chat_secret_material(value: str) -> str:
     """Reject concrete high-risk material without censoring harmless topic words."""
 
     cleaned = str(value or "").strip()
     if not cleaned:
         raise ChatInputRejected("chat text cannot be empty")
+    scan_text = _secret_scan_view(cleaned)
 
     for pattern in CHAT_EXTRACTION_TOKEN_PATTERNS:
-        if pattern.search(cleaned):
+        if pattern.search(scan_text):
             raise ChatInputRejected("chat text contains prohibited secret material")
-    if CHAT_LABELLED_TOKEN_CREDENTIAL_PATTERN.search(cleaned):
+    if CHAT_LABELLED_TOKEN_CREDENTIAL_PATTERN.search(scan_text):
         raise ChatInputRejected("chat text contains prohibited secret material")
-    if CHAT_LABELLED_PASSWORD_PATTERN.search(cleaned):
+    if CHAT_LABELLED_PASSWORD_PATTERN.search(scan_text):
         raise ChatInputRejected("chat text contains prohibited secret material")
-    if CHAT_ALL_WORD_PASSPHRASE_PATTERN.search(cleaned):
+    if CHAT_ALL_WORD_PASSPHRASE_PATTERN.search(scan_text):
         raise ChatInputRejected("chat text contains prohibited secret material")
-    if CHAT_POSSESSIVE_SINGLE_WORD_PASSWORD_PATTERN.search(cleaned):
+    if CHAT_POSSESSIVE_SINGLE_WORD_PASSWORD_PATTERN.search(scan_text):
+        raise ChatInputRejected("chat text contains prohibited secret material")
+    if CHAT_BARE_SINGLE_WORD_PASSWORD_PATTERN.search(scan_text):
         raise ChatInputRejected("chat text contains prohibited secret material")
     for pattern in CHAT_LABELLED_BANK_CREDENTIAL_PATTERNS:
-        if pattern.search(cleaned):
+        if pattern.search(scan_text):
             raise ChatInputRejected("chat text contains prohibited financial credential material")
-    for match in re.finditer(r"(?:\d[ -]?){13,19}", cleaned):
+    for match in re.finditer(r"(?:\d[ -]?){13,19}", scan_text):
         digits = re.sub(r"\D", "", match.group(0))
         if memory_extraction._luhn_valid(digits):
             raise ChatInputRejected("chat text contains prohibited payment-card material")
     for pattern in CHAT_SECRET_PATTERNS:
-        if pattern.search(cleaned):
+        if pattern.search(scan_text):
             raise ChatInputRejected("chat text contains recognizable credential material")
     return cleaned
 
