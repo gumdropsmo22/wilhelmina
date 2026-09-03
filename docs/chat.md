@@ -5,7 +5,7 @@ Phase 6 turns Wilhelmina's authorization-first Memory Ledger into live conversat
 - **6A — MERGED:** deterministic Discord routing, trusted member references, and audience-aware memory authorization.
 - **6B — MERGED:** private provider-backed Wilhelmina responses.
 - **6C — MERGED:** bounded local conversation continuity, dedupe, ordering, edit/delete reconciliation, and provider-concurrency control.
-- **6D — IN REVIEW:** hostile hardening of prompt authority, concrete secret boundaries, generated output, and in-flight Discord source races.
+- **6D — BUILT + TESTED, REVIEW BLOCKERS RESOLVED:** hostile hardening of prompt authority, practical credential boundaries, generated output, and in-flight Discord source races; awaiting explicit merge authorization.
 - **6E — PLANNED:** live Discord/provider rollout and behavioral validation.
 
 ## Approved interaction surfaces
@@ -63,7 +63,7 @@ She may, for entertainment inside the intended tiny private server:
 - play contradictions against each other;
 - embellish harmless connective details.
 
-Fact / Inference / Impression / Gossip remain useful internal context labels, but user-facing chat does not have to reproduce them faithfully or qualify every rumor. This social freedom does **not** widen hard boundaries around credentials, private keys, payment credentials, identity-document numbers, doxxing-grade addresses, `admin_only`, hidden `owner_only`, guild isolation, commands, destructive actions, or permissions.
+Fact / Inference / Impression / Gossip remain useful internal context labels, but user-facing chat does not have to reproduce them faithfully or qualify every rumor. This social freedom does **not** widen actual credential, `admin_only`, hidden `owner_only`, guild-isolation, command, destructive-action, or permission boundaries.
 
 ## Phase 6D provider authority boundary
 
@@ -90,25 +90,27 @@ Each payload is JSON-quoted before interpolation and labeled as untrusted data. 
 
 The shared `services.ai` boundary accepts optional `instructions` while preserving the old request shape for every caller that does not use them. Private chat still uses workload routing, enhanced-retention assertion, and `store=false`.
 
-## Concrete secret boundary
+## Practical credential boundary
 
-Chat secret handling protects concrete credentials/security material rather than banning ordinary topic words.
+Chat secret handling protects concrete credentials/security material rather than banning ordinary topic words or attempting enterprise-grade PII loss prevention.
 
 Recognizable blocked forms include:
 
 - common provider/API/auth tokens;
 - labelled credential values such as `password: <value>` or `api key = <value>`;
+- bare/possessive password assignments where the text clearly supplies an actual credential value;
 - credential-bearing connection URLs such as `scheme://user:password@host` and password-only user-info forms;
 - PEM/OpenPGP, PuTTY, and SSH2 private-key forms;
-- recognizable private identity-document-number forms;
-- Luhn-valid payment-card numbers;
-- other concrete private-ID/address forms already shared with the extraction boundary.
+- Luhn-valid payment-card numbers and CVV-style values;
+- labelled banking credential values.
 
-Ordinary sentences such as discussing password managers or needing to renew a passport are not credentials merely because they contain those words.
+Common Discord Markdown wrappers are normalized in a scan-only copy so inline code cannot trivially hide an otherwise obvious credential. Ordinary sentences such as discussing password managers or needing to renew a passport are not credentials merely because they contain those words.
 
-The current message, authorized memory context, recent history, and generated model output are all scanned locally at their provider/Discord boundaries. A model-generated credential therefore fails closed to deterministic fallback **before Discord delivery** and is not admitted to continuity history.
+The current message, authorized memory context, recent history, and generated model output are all scanned locally at their provider/Discord boundaries. A model-generated credential therefore fails closed to deterministic fallback **before Discord delivery** and is not admitted to continuity history. Full model output is scanned before Discord-length clipping and the clipped result is scanned again.
 
-This is a security boundary, not a general sensitive-topic filter.
+Existing simple identity-number/private-address safeguards may remain, but Phase 6D is explicitly **not** a generalized PII/DLP system. The owner does not want the tranche held open for increasingly theoretical SSN/address/personal-information formatting variants absent a concrete access risk or binding external/platform requirement.
+
+This is a practical security boundary, not a general sensitive-topic or compliance filter.
 
 ## OpenAI provider boundary
 
@@ -132,7 +134,7 @@ Generated text:
 - preserves intentional paragraphs;
 - normalizes stray whitespace;
 - is clipped to 1,900 characters;
-- is hard-secret scanned before delivery;
+- is practical-hard-secret scanned before delivery;
 - is sent as a reply to the triggering message;
 - suppresses automatic author pings;
 - uses `AllowedMentions.none()` so generated text cannot ping users, roles, or `@everyone`.
@@ -165,7 +167,7 @@ The runtime maintains a bounded process-local source-mutation map:
 - safe edit -> latest safe member text;
 - delete or unsafe edit -> tombstone.
 
-If a delete or secret-bearing edit arrives while generation is in flight, the tombstone wins over the stale original event snapshot. The stale reply is suppressed before Discord send and no stale exchange enters history.
+If a delete or credential-bearing unsafe edit arrives while generation is in flight, the tombstone wins over the stale original event snapshot. The stale reply is suppressed before Discord send and no stale exchange enters history.
 
 If a safe edit arrives while generation is in flight, the already-generated reply may still be sent under the established no-regeneration contract, but the eventual continuity record uses the latest safe member text rather than the stale event snapshot.
 
@@ -182,8 +184,9 @@ Automated hostile coverage includes:
 
 - routing/audience/reference authorization regressions;
 - cross-member raw-evidence authorization in both guild and DM contexts;
-- current-message, context, history, and output hard-secret rejection;
+- current-message, context, history, and output practical-credential rejection;
 - benign credential-topic language remaining conversationally usable;
+- Markdown-wrapped concrete credential detection;
 - JSON quoting of fake section headings/instructions;
 - Responses `instructions` forwarding with `store=false` preserved;
 - the chat persona/security contract living in provider instructions rather than user/data input;
