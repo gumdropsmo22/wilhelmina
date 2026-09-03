@@ -835,7 +835,7 @@ The current broad build sequence is:
 3. Memory administration — completed.
 4. Automatic memory extraction — **MERGED** into `main`.
 5. Context intelligence / retrieval — **MERGED** into `main`.
-6. Wilhelmina's memory-aware chat brain — **Phases 6A–6C MERGED** into `main`; **Phase 6D BUILT + TESTED + IN REVIEW** for hostile hardening; Phase 6E live rollout/behavioral validation remains next.
+6. Wilhelmina's memory-aware chat brain — **Phases 6A–6C MERGED** into `main`; **Phase 6D BUILT + TESTED + REVIEW BLOCKERS RESOLVED, awaiting explicit merge authorization**; Phase 6E live rollout/behavioral validation remains next.
 7. Hardening, deployment, broader listening pathway, and final operational readiness.
 
 Additional work required before or alongside later phases includes:
