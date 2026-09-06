@@ -222,6 +222,81 @@ async def test_raw_edit_updates_history_without_regenerating(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_delete_during_generation_suppresses_stale_reply_and_history(tmp_path, monkeypatch, caplog):
+    path = tmp_path / "chat.sqlite3"
+    _setup(path)
+    cog = Chat(_bot(path))
+    message = _message(message_id=900, content="delete me")
+
+    async def fake_generate(**kwargs):
+        await cog.on_raw_message_delete(SimpleNamespace(guild_id=100, message_id=900))
+        return chat_response.ChatReply(text="stale answer", provider_used=True)
+
+    monkeypatch.setattr(chat_response, "generate_chat_reply_async", fake_generate)
+
+    with caplog.at_level("INFO", logger="wilhelmina.chat.events"):
+        await cog.on_message(message)
+
+    assert message.reply.await_count == 0
+    assert all(not entries for entries in cog.runtime._histories.values())
+    assert "chat_reply_suppressed reason=source_deleted_or_withheld" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_unsafe_edit_during_generation_suppresses_stale_reply_and_history(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "chat.sqlite3"
+    _setup(path)
+    cog = Chat(_bot(path))
+    message = _message(message_id=901, content="ordinary text")
+
+    async def fake_generate(**kwargs):
+        await cog.on_raw_message_edit(
+            SimpleNamespace(
+                guild_id=100,
+                message_id=901,
+                data={"content": "redis://:secretpass@cache.internal/0"},
+            )
+        )
+        return chat_response.ChatReply(text="stale answer", provider_used=True)
+
+    monkeypatch.setattr(chat_response, "generate_chat_reply_async", fake_generate)
+    await cog.on_message(message)
+
+    assert message.reply.await_count == 0
+    assert all(not entries for entries in cog.runtime._histories.values())
+
+
+@pytest.mark.asyncio
+async def test_safe_edit_during_generation_updates_recorded_member_text_without_regeneration(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "chat.sqlite3"
+    _setup(path)
+    cog = Chat(_bot(path))
+    message = _message(message_id=902, content="old question")
+    calls = 0
+
+    async def fake_generate(**kwargs):
+        nonlocal calls
+        calls += 1
+        await cog.on_raw_message_edit(
+            SimpleNamespace(guild_id=100, message_id=902, data={"content": "new question"})
+        )
+        return chat_response.ChatReply(text="answer", provider_used=True)
+
+    monkeypatch.setattr(chat_response, "generate_chat_reply_async", fake_generate)
+    await cog.on_message(message)
+
+    assert calls == 1
+    assert message.reply.await_count == 1
+    history_entries = next(iter(cog.runtime._histories.values()))
+    assert history_entries[0].content == "new question"
+    assert history_entries[1].content == "answer"
+
+
+@pytest.mark.asyncio
 async def test_chat_cog_ignores_unaddressed_non_designated_guild_message(
     tmp_path,
     caplog,

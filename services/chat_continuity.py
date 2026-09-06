@@ -36,7 +36,8 @@ class ChatContinuityRuntime:
     """Bounded in-process chat history, duplicate suppression, and serialization.
 
     Nothing here is persisted. A process restart intentionally resets short-term history,
-    duplicate state, and locks; the durable Memory Ledger remains long-term canonical state.
+    duplicate state, source-mutation state, and locks; the durable Memory Ledger remains
+    long-term canonical state.
     """
 
     def __init__(
@@ -54,6 +55,10 @@ class ChatContinuityRuntime:
         self._locks: dict[ConversationKey, asyncio.Lock] = {}
         self._inflight_message_ids: set[int] = set()
         self._recent_message_ids: OrderedDict[int, None] = OrderedDict()
+        # A value of None is a delete/unsafe-edit tombstone. A string is the latest safe
+        # edited member text. Keeping this separately closes the race where a raw edit/delete
+        # arrives while generation is still in flight and before history exists to rewrite.
+        self._source_mutations: OrderedDict[int, str | None] = OrderedDict()
         self.generation_semaphore = asyncio.Semaphore(max(1, int(max_concurrent_generations)))
 
     def conversation_key(
@@ -117,6 +122,21 @@ class ChatContinuityRuntime:
             entries.pop(0)
         return entries
 
+    def _remember_source_mutation(self, message_id: int, content: str | None) -> None:
+        resolved = int(message_id)
+        self._source_mutations.pop(resolved, None)
+        self._source_mutations[resolved] = None if content is None else str(content)
+        while len(self._source_mutations) > self.max_recent_message_ids:
+            self._source_mutations.popitem(last=False)
+
+    def source_text_for_record(self, message_id: int, original_text: str) -> str | None:
+        """Return the latest safe source text, or None if the source was deleted/withheld."""
+
+        resolved = int(message_id)
+        if resolved not in self._source_mutations:
+            return str(original_text)
+        return self._source_mutations[resolved]
+
     def record_exchange(
         self,
         key: ConversationKey,
@@ -125,15 +145,24 @@ class ChatContinuityRuntime:
         author_user_id: int,
         user_text: str,
         assistant_text: str,
-    ) -> None:
-        """Record a successfully generated/sent exchange in bounded process memory."""
+    ) -> bool:
+        """Record a successfully generated/sent exchange in bounded process memory.
+
+        A delete or unsafe edit that arrived while generation was in flight wins over the stale
+        event snapshot. A safe edit is recorded as the current member side while the already-sent
+        Wilhelmina reply remains unchanged, matching the established no-regeneration contract.
+        """
+
+        resolved_user_text = self.source_text_for_record(source_message_id, user_text)
+        if resolved_user_text is None:
+            return False
 
         entries = self._histories.setdefault(key, [])
         entries.extend(
             (
                 ConversationEntry(
                     role="member",
-                    content=str(user_text),
+                    content=resolved_user_text,
                     source_message_id=int(source_message_id),
                     author_user_id=int(author_user_id),
                 ),
@@ -146,6 +175,7 @@ class ChatContinuityRuntime:
             )
         )
         self._trim(entries)
+        return True
 
     def remove_source_message(self, message_id: int) -> int:
         """Remove an edited/deleted source turn and its paired Wilhelmina reply from history."""
@@ -164,13 +194,20 @@ class ChatContinuityRuntime:
             self._histories.pop(key, None)
         return removed
 
+    def note_source_deleted(self, message_id: int) -> int:
+        """Tombstone a source even if its generated exchange has not been recorded yet."""
+
+        self._remember_source_mutation(message_id, None)
+        return self.remove_source_message(message_id)
+
     def replace_member_message(self, message_id: int, content: str) -> bool:
         """Update only the member side of an existing ephemeral turn after a Discord edit."""
 
         resolved = int(message_id)
         changed = False
-        for key, entries in self._histories.items():
+        for key, entries in list(self._histories.items()):
             rewritten: list[ConversationEntry] = []
+            key_changed = False
             for item in entries:
                 if item.source_message_id == resolved and item.role == "member":
                     rewritten.append(
@@ -182,11 +219,18 @@ class ChatContinuityRuntime:
                         )
                     )
                     changed = True
+                    key_changed = True
                 else:
                     rewritten.append(item)
-            if changed:
+            if key_changed:
                 self._histories[key] = self._trim(rewritten)
         return changed
+
+    def note_source_edit(self, message_id: int, content: str) -> bool:
+        """Remember a safe edit and rewrite history if the exchange already exists."""
+
+        self._remember_source_mutation(message_id, str(content))
+        return self.replace_member_message(message_id, str(content))
 
     def render_history(self, key: ConversationKey) -> str:
         """Render bounded history as untrusted conversational data, never authorization."""
