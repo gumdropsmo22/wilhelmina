@@ -835,8 +835,8 @@ The current broad build sequence is:
 3. Memory administration — completed.
 4. Automatic memory extraction — **MERGED** into `main`.
 5. Context intelligence / retrieval — **MERGED** into `main`.
-6. Wilhelmina's memory-aware chat brain — **Phases 6A–6C MERGED** into `main`; **Phase 6D BUILT + TESTED + REVIEW BLOCKERS RESOLVED, awaiting explicit merge authorization**; Phase 6E live rollout/behavioral validation remains next.
-7. Hardening, deployment, broader listening pathway, and final operational readiness.
+6. Wilhelmina's memory-aware chat brain — **Phases 6A–6C MERGED** into `main`; **Phase 6D BUILT + TESTED + REVIEW BLOCKERS RESOLVED, awaiting explicit merge authorization**. Live Discord/provider validation is **not** the immediate next step and is deliberately deferred until the remaining planned feature work and final integration/hardening are complete.
+7. Remaining experience features and final operational hardening/readiness. After Phase 6D lands, resume the unfinished feature docket (including Welcome and Tarot/Readings, plus other approved experience work) before project-wide live validation/deployment.
 
 Additional work required before or alongside later phases includes:
 
@@ -844,7 +844,7 @@ Additional work required before or alongside later phases includes:
 - aligning persona/privacy/product doctrine;
 - deliberately designing the evolving personality-analysis layer;
 - resolving explicit product decisions such as the current project-level 18+ gate;
-- production deployment, backups, monitoring, recovery, and live validation.
+- production deployment, backups, monitoring, recovery, and **live validation as the final project-wide proving stage after the remaining feature build is complete**.
 
 Do not skip dependency order merely because a later feature is more exciting unless the product owner explicitly approves parallel work.
 
