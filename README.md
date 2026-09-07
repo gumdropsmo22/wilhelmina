@@ -19,6 +19,7 @@ cogs.core               /about, /uptime
 cogs.admin              /admin diagnostics, /admin features, /admin sync, /admin config ...
 cogs.help               /help
 cogs.rules              /rules, /rules-admin ...
+cogs.welcome            automatic configured-channel join greeting
 cogs.memory_admin       /memory-admin ...
 cogs.memory_extraction  interaction-scoped automatic Memory Ledger extraction
 cogs.chat               memory-aware direct-interaction chat with bounded local continuity
@@ -36,6 +37,7 @@ Each optional feature has its own flag:
 ```env
 ENABLE_HELP=true
 ENABLE_RULES=true
+ENABLE_WELCOME=false
 ENABLE_MEMORY_ADMIN=true
 ENABLE_MEMORY_EXTRACTION=false
 ENABLE_CHAT=false
@@ -156,7 +158,9 @@ The stored guild configuration is the source of truth for server role/channel ID
 
 ## Living Command Grimoire
 
-`/help` opens Wilhelmina's dynamic public command grimoire. It reads the live slash-command tree, hides admin tooling, groups public commands into categories, and can show sealed future doors such as tarot, readings, rituals, welcome, and broadcast.
+`/help` opens Wilhelmina's dynamic public command grimoire. It reads the live slash-command tree, hides admin tooling, groups public commands into categories, and can show sealed future doors such as tarot, readings, rituals, and broadcast.
+
+Welcome is not a slash command. When `ENABLE_WELCOME=true`, a human joining `HOME_GUILD_ID` receives one Wilhelmina-styled greeting in the configured `welcome_channel_id`. The feature is disabled by default until final rollout and live validation.
 
 The grimoire uses the Persona Engine's `help` feature profile for short AI-polished intro text when `OPENAI_API_KEY` is configured. If AI is unavailable, it falls back to deterministic copy.
 
@@ -216,198 +220,4 @@ Core commands:
 /memory-admin member-data-id
 /memory-admin delete-member
 /memory-admin delete-member-id
-```
-
-The persistent pause/resume switch is separate from `MEMORY_COLLECTION_MODE`. Resuming the local gate does not activate automatic extraction by itself. Search and inspection are local SQLite operations and do not need an API key.
-
-Exact duplicate admin writes merge receipts/evidence only. They do **not** silently change privacy, reveal scope, or importance. Metadata changes require `/memory-admin edit`, which may explicitly tighten or loosen a valid privacy/reveal pair.
-
-Single-memory deletion requires the exact confirmation text `DELETE`. Member-wide Memory Ledger deletion requires `DELETE MEMBER`. The member-wide purge removes the member's own Memory Ledger records **and** receipts they authored on other members' memories. Any memory left with zero evidence is also deleted; memories that still have another receipt survive. The purge deliberately does **not** silently delete Coven Registry or private identity rows.
-
-`member-data-id` and `delete-member-id` provide the same private controls for departed/archived users who are no longer selectable as `discord.Member`.
-
-See `docs/memory_controls.md` and `docs/memory_ledger.md` for the privacy and data-control contract.
-
-## Automatic Memory Ledger extraction
-
-`cogs.memory_extraction` is the Phase 4 interaction-scoped ingestion worker. It is **disabled by default** and does not enable broad whole-server listening.
-
-When explicitly enabled, eligible human text is limited to direct DMs with Wilhelmina, the designated Wilhelmina chat, direct mentions, and resolvable replies to Wilhelmina. Unaddressed ambient guild chatter remains excluded even if future ambient environment switches exist.
-
-Minimum activation shape:
-
-```env
-ENABLE_MEMORY_EXTRACTION=true
-MEMORY_COLLECTION_MODE=interaction
-OPENAI_RETENTION_MODE=mam
-```
-
-`zdr` may be used instead of `mam` when that approved project configuration is available. The environment value is only a deployment assertion; the corresponding retention control must actually be configured for the OpenAI project. Private extraction requests use `store=false`.
-
-Enabling extraction requests Discord's Message Content intent, which must also be enabled in the Discord Developer Portal. The persistent Memory Ledger collection gate must be resumed, and the speaking member must have a completed private identity profile. There is no separate adult-memory-consent/version permission gate.
-
-Phase 4 uses schema-v11 queue ownership with per-claim tokens, absolute raw-text TTL cleanup, atomic authorization before queue persistence, uncached/raw edit handling, and deterministic dangerous-secret rejection both before OpenAI and after structured model output. Medical, mental-health, adult relationship/sexual, political, religious, identity, substance-use, embarrassing, gossip, and other socially sensitive material is not blocked merely because of its subject category. SQLite/Python remain authoritative; the model cannot authorize access or mutate memory directly.
-
-For upgrades from the earlier v10 extraction draft, stop/drain old workers before enabling v11. v11 invalidates leftover tokenless processing rows and installs database enforcement that prevents old-style tokenless claims from entering `processing`.
-
-See `docs/memory_extraction.md` for the full eligibility, privacy, queue, rollout, and rollback contract.
-
-## Phase 5 memory context intelligence
-
-`services.memory_context` assembles deterministic memory context for the Phase-6 chat brain.
-
-The current speaker receives their complete **permitted** active profile: `cross_member` and their own `owner_only` memories, but never `admin_only`. Relevant memories about other members are retrieved only from `cross_member` rows through local FTS and explicit member/entity links. Authorization happens before ranking, so importance, relevance, recency, or contradiction cannot widen a memory's reveal scope.
-
-Phase 5 also expands revealable contradiction partners, includes bounded receipt evidence, preserves `Fact`/`Inference`/`Impression`/unverified `Gossip`, and re-runs the deterministic hard-secret guard at retrieval time so a malformed or legacy credential-containing row cannot be resurrected into a prompt. Corruption-tolerant retrieval also rechecks guild isolation, valid privacy/reveal combinations, Admin-note invariants, and recognizable private-key formats before context can escape the service layer.
-
-The service uses the speaker's trusted identity context, including current Discord display name, preferred name, full canonical birth date, and locally calculated age. The existing under-18 profile-completion behavior remains **PRODUCT DECISION PENDING** and Phase 5 does not expand it.
-
-This phase does **not** build the separately policy-gated permanent/evolving personality-analysis dossier, does not add ambient whole-server listening, does not create a new consent/version gate, does not call OpenAI, and does not persist a new context table.
-
-See `docs/memory_context.md` for the authorization matrix, ranking, contradiction, evidence, secret-hardening, rollback, and validation contract.
-
-## Phase 6 memory-aware chat
-
-`cogs.chat`, `services.chat`, `services.chat_response`, and `services.chat_continuity` implement Wilhelmina's approved direct-interaction conversational path. The feature is disabled by default:
-
-```env
-ENABLE_CHAT=false
-```
-
-Approved surfaces are one-to-one DMs, direct mentions, resolvable replies to Wilhelmina, and ordinary eligible human text in the designated Wilhelmina channel. Unaddressed chatter elsewhere in the guild is ignored. Bots, webhooks, empty messages, wrong-guild messages, and existing `!` prefix commands are excluded.
-
-Chat and automatic memory extraction are independent. `ENABLE_CHAT=true` requests Message Content intent even when extraction is off. Pausing Memory Ledger collection does **not** mute chat or prevent already-authorized memory from being used for conversation.
-
-The speaker's `owner_only` memories may be used in that speaker's one-to-one DM, but are removed before a guild-visible prompt is constructed. Other-member context remains `cross_member` only; `admin_only` never enters ordinary chat. Trusted member references come only from Discord-resolved mentions/reply authors or exact Coven Marks resolved through the local Registry. Fuzzy names and the model cannot create retrieval authority.
-
-The response prompt combines Wilhelmina's canonical persona, trusted identity, the already-authorized memory bundle, bounded recent conversation history, and the current message. Memory/evidence/history are data rather than authority. Current messages and history admission use deterministic credential/private-key guards before private provider use.
-
-The response provider uses the shared async private OpenAI boundary with workload `chat`; private chat requires the existing MAM/ZDR deployment posture and forces provider storage off. Provider-managed conversation IDs are not canonical state.
-
-Short-term continuity is process-local and bounded to 24 entries / 24,000 content characters per DM/channel. DMs are isolated per interlocutor; guild-visible history is isolated per Discord channel. Duplicate message IDs are suppressed, messages in the same conversation serialize through a lock, and provider concurrency is globally bounded to three simultaneous generations. Deletes remove the paired ephemeral turn; edits update only the member side without replaying old responses. Restart clears all short-term continuity/dedupe state.
-
-Generated replies are capped at 1,900 characters, suppress author/role/everyone pings, and use deterministic fallback copy when the private provider is unavailable or misconfigured. No prompt, response text, memory summary, evidence excerpt, birthday, or message content is written to operational logs.
-
-Phase 6 through 6C adds no permanent transcript table, no ambient whole-server listener, no image generation, no new consent/version gate, no under-18 redesign, and no permanent/evolving personality dossier.
-
-See `docs/chat.md` for the routing matrix, memory audience rules, prompt/provider contract, continuity boundaries, reliability behavior, tests, and rollback.
-
-## Scheduled Daily Broadcasts
-
-`cogs.broadcasts` adds `/broadcast-admin` controls for Wilhelmina's automatic daily show system.
-
-Segments:
-
-```txt
-morning  The Vanguard Frequency   default 08:00 Asia/Riyadh
-evening  W.W.N. Broadcast          default 21:30 Asia/Riyadh
-```
-
-Admin commands:
-
-```txt
-/broadcast-admin status
-/broadcast-admin preview
-/broadcast-admin send-test
-/broadcast-admin enable
-/broadcast-admin disable
-/broadcast-admin set-channel
-/broadcast-admin set-time
-/broadcast-admin set-timezone
-```
-
-Broadcasts are disabled by default. The system stores schedule settings, run history, idempotency keys, and text-history hashes in SQLite. Until final news and astronomy providers are configured, previews and test sends use deterministic fallback copy and scheduled runs skip posting rather than inventing headlines or sky data.
-
-Recommended first setup:
-
-```env
-ENABLE_BROADCASTS=true
-```
-
-Then run:
-
-```txt
-/broadcast-admin set-channel target:default channel:#your-channel
-/broadcast-admin preview segment:morning
-/broadcast-admin send-test segment:evening
-/broadcast-admin enable segment:all
-```
-
-## Persona Engine
-
-Wilhelmina has a central Persona Engine with one base voice and feature-specific **feature profiles**.
-
-Current feature profiles:
-
-```txt
-help                 /help
-rules_intro          /rules intro copy
-rules_acceptance     rules acceptance copy
-admin                admin/status copy hooks
-fortune              /fortune
-welcome              future welcome messages
-chat                 Phase-6 chat response profile
-broadcast_morning    The Vanguard Frequency generation
-broadcast_evening    W.W.N. Broadcast generation
-```
-
-This keeps Wilhelmina recognizable while allowing each feature to apply the right functional limits. Protected/identity traits may be mentioned factually when relevant; the persona boundary is against using the trait itself as the basis for dehumanizing or comparable targeted abuse.
-
-The `chat` profile supplies the live Phase-6 response ceiling and fallback while the shared base voice remains canonical.
-
-## AI-backed features
-
-`/8ball`, `/fortune`, `/help`, `/rules`, and `/broadcast-admin preview/send-test` can use AI first when `OPENAI_API_KEY` is configured, then fall back to static or stored responses if AI is unavailable.
-
-Automatic Memory Ledger extraction uses the private structured-memory provider path and fails closed if the required private retention configuration is unavailable. It has no static fallback that persists guessed memories.
-
-Memory-aware Phase-6 chat also uses the private provider path. It sends only locally authorized context, requires the enhanced-retention deployment assertion, forces provider response storage off, and uses deterministic fallback copy rather than persisting guessed state when the provider cannot run.
-
-```env
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5.6-sol
-OPENAI_CHAT_MODEL=gpt-5.6-sol
-OPENAI_MEMORY_MODEL=gpt-5.6-terra
-AI_TIMEOUT_SECONDS=8
-AI_MAX_RETRIES=1
-OPENAI_RETENTION_MODE=standard
-```
-
-## Running locally
-
-```bash
-python bot.py
-```
-
-## Tests and checks
-
-```bash
-ruff check .
-pytest
-```
-
-CI runs the same checks on push and pull request.
-
-## Feature flag policy
-
-Required cogs:
-
-```env
-ENABLE_CORE=true
-ENABLE_ADMIN=true
-```
-
-Optional cogs:
-
-```env
-ENABLE_HELP=true
-ENABLE_RULES=true
-ENABLE_MEMORY_ADMIN=true
-ENABLE_MEMORY_EXTRACTION=false
-ENABLE_CHAT=false
-ENABLE_INVITE=false
-ENABLE_ROLL=false
-ENABLE_EIGHT_BALL=false
-ENABLE_FORTUNE=false
-ENABLE_BROADCASTS=false
 ```
