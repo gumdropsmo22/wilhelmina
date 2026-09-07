@@ -306,12 +306,31 @@ def _log_success(result: AIResult, *, purpose: str) -> None:
     )
 
 
+def _response_request(
+    *,
+    config: AIConfig,
+    prompt: str,
+    instructions: str | None,
+) -> dict[str, object]:
+    """Build a Responses request without changing legacy calls that omit instructions."""
+
+    request: dict[str, object] = {
+        "model": config.model,
+        "input": prompt,
+        "store": config.store_responses,
+    }
+    if instructions is not None and instructions.strip():
+        request["instructions"] = instructions.strip()
+    return request
+
+
 def generate_result(
     prompt: str,
     *,
     config: AIConfig | None = None,
     preserve_newlines: bool = False,
     purpose: str = "text",
+    instructions: str | None = None,
 ) -> AIResult | None:
     """Generate text synchronously and return safe response metadata on success."""
 
@@ -328,9 +347,7 @@ def generate_result(
             timeout=config.timeout_seconds,
             max_retries=config.max_retries,
         ).responses.create(
-            model=config.model,
-            input=prompt,
-            store=config.store_responses,
+            **_response_request(config=config, prompt=prompt, instructions=instructions)
         )
         result = _result_from_response(
             response,
@@ -352,6 +369,7 @@ async def generate_result_async(
     config: AIConfig | None = None,
     preserve_newlines: bool = False,
     purpose: str = "text",
+    instructions: str | None = None,
 ) -> AIResult | None:
     """Generate text with the native asynchronous OpenAI client."""
 
@@ -368,9 +386,7 @@ async def generate_result_async(
             timeout=config.timeout_seconds,
             max_retries=config.max_retries,
         ).responses.create(
-            model=config.model,
-            input=prompt,
-            store=config.store_responses,
+            **_response_request(config=config, prompt=prompt, instructions=instructions)
         )
         result = _result_from_response(
             response,
@@ -394,6 +410,7 @@ async def generate_private_result_async(
     policy: AIPlatformPolicy | None = None,
     preserve_newlines: bool = False,
     require_enhanced_retention: bool = True,
+    instructions: str | None = None,
 ) -> AIResult | None:
     """Run an async private-content request through the fail-closed privacy policy."""
 
@@ -407,6 +424,7 @@ async def generate_private_result_async(
         config=config,
         preserve_newlines=preserve_newlines,
         purpose=purpose,
+        instructions=instructions,
     )
 
 

@@ -185,8 +185,19 @@ class Chat(commands.Cog):
                     fallback_reason="unexpected_generation_failure",
                 )
 
+            if self.runtime.source_text_for_record(envelope.message_id, envelope.content) is None:
+                self.runtime.complete_message(envelope.message_id)
+                logger.info(
+                    "chat_reply_suppressed reason=source_deleted_or_withheld guild_id=%s "
+                    "message_id=%s author_user_id=%s",
+                    home_guild_id,
+                    envelope.message_id,
+                    envelope.author_user_id,
+                )
+                return
+
             try:
-                await message.reply(
+                sent_reply = await message.reply(
                     reply.text,
                     mention_author=False,
                     allowed_mentions=discord.AllowedMentions.none(),
@@ -204,10 +215,36 @@ class Chat(commands.Cog):
                 )
                 return
 
+            # Raw source mutation handlers run independently of this conversation lock. If the
+            # source is deleted or becomes unsafe during the network await above, remove the
+            # just-created bot reply when possible and never admit the stale exchange to history.
+            if self.runtime.source_text_for_record(envelope.message_id, envelope.content) is None:
+                try:
+                    await sent_reply.delete()
+                except (discord.HTTPException, AttributeError) as exc:
+                    logger.warning(
+                        "chat_send_cleanup_failed guild_id=%s message_id=%s author_user_id=%s "
+                        "exception=%s status=%s",
+                        home_guild_id,
+                        envelope.message_id,
+                        envelope.author_user_id,
+                        type(exc).__name__,
+                        getattr(exc, "status", None),
+                    )
+                self.runtime.complete_message(envelope.message_id)
+                logger.info(
+                    "chat_reply_retracted reason=source_deleted_or_withheld guild_id=%s "
+                    "message_id=%s author_user_id=%s",
+                    home_guild_id,
+                    envelope.message_id,
+                    envelope.author_user_id,
+                )
+                return
+
             if reply.provider_used:
                 try:
                     safe_user_text = chat_response.validate_chat_input(envelope.content)
-                    safe_assistant_text = chat_response.validate_chat_input(reply.text)
+                    safe_assistant_text = chat_response.validate_chat_output(reply.text)
                 except chat_response.ChatInputRejected:
                     logger.warning(
                         "chat_history_skipped reason=secret_guard guild_id=%s message_id=%s "
@@ -217,13 +254,21 @@ class Chat(commands.Cog):
                         envelope.author_user_id,
                     )
                 else:
-                    self.runtime.record_exchange(
+                    recorded = self.runtime.record_exchange(
                         key,
                         source_message_id=envelope.message_id,
                         author_user_id=envelope.author_user_id,
                         user_text=safe_user_text,
                         assistant_text=safe_assistant_text,
                     )
+                    if not recorded:
+                        logger.info(
+                            "chat_history_skipped reason=source_deleted_or_withheld guild_id=%s "
+                            "message_id=%s author_user_id=%s",
+                            home_guild_id,
+                            envelope.message_id,
+                            envelope.author_user_id,
+                        )
 
             self.runtime.complete_message(envelope.message_id)
             logger.info(
@@ -248,7 +293,7 @@ class Chat(commands.Cog):
             return
         if payload.guild_id is not None and int(payload.guild_id) != int(home_guild_id):
             return
-        removed = self.runtime.remove_source_message(int(payload.message_id))
+        removed = self.runtime.note_source_deleted(int(payload.message_id))
         if removed:
             logger.info(
                 "chat_history_source_deleted guild_id=%s message_id=%s removed_entries=%s",
@@ -270,7 +315,7 @@ class Chat(commands.Cog):
         try:
             cleaned = chat_response.validate_chat_input(str(content))
         except chat_response.ChatInputRejected:
-            removed = self.runtime.remove_source_message(int(payload.message_id))
+            removed = self.runtime.note_source_deleted(int(payload.message_id))
             if removed:
                 logger.info(
                     "chat_history_source_edit_removed reason=secret_guard guild_id=%s message_id=%s",
@@ -278,7 +323,7 @@ class Chat(commands.Cog):
                     payload.message_id,
                 )
             return
-        if self.runtime.replace_member_message(int(payload.message_id), cleaned):
+        if self.runtime.note_source_edit(int(payload.message_id), cleaned):
             logger.info(
                 "chat_history_source_edited guild_id=%s message_id=%s",
                 home_guild_id,
