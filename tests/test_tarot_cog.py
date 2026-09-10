@@ -34,11 +34,11 @@ class FakeInteraction:
         self.followup = FakeFollowup()
 
 
-def _reading():
+def _reading(*, question=None):
     return tarot.TarotReading(
         spread=tarot.SpreadKind.SINGLE,
         cards=(tarot.DrawnCard("Card", tarot.CARD_BY_ID["major_00_the_fool"], tarot.Orientation.UPRIGHT),),
-        question=None,
+        question=question,
     )
 
 
@@ -80,3 +80,12 @@ def test_reading_embed_preserves_card_and_orientation():
     assert embed.description == "Move."
     assert "The Fool" in embed.fields[0].name
     assert "Upright" in embed.fields[0].value
+
+
+def test_reading_embed_clips_only_displayed_long_question():
+    question = "q" * 2000
+    reading = _reading(question=question)
+    embed = tarot_cog._reading_embed(reading, tarot.TarotInterpretation(text="Move.", provider_used=True))
+    assert reading.question == question
+    assert len(embed.fields[0].value) == tarot_cog.EMBED_FIELD_VALUE_LIMIT
+    assert embed.fields[0].value.endswith("…")
