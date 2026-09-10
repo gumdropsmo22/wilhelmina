@@ -19,9 +19,9 @@ def test_tarot_feature_flag_exists_and_defaults_off(monkeypatch):
     assert flag.default_enabled is False
 
 
-def test_tarot_is_divination_and_not_coming_soon():
+def test_disabled_tarot_remains_a_sealed_divination_door():
     assert help_service.DEFAULT_CATEGORY_MAP["tarot"] == "divination"
-    assert "/tarot" not in help_service.COMING_SOON["divination"]
+    assert "/tarot" in help_service.COMING_SOON["divination"]
 
 
 @pytest.mark.asyncio
