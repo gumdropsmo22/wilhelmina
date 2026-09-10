@@ -13,6 +13,7 @@ VISIBILITY_CHOICES = [
     app_commands.Choice(name="Public", value="public"),
     app_commands.Choice(name="Private", value="private"),
 ]
+EMBED_FIELD_VALUE_LIMIT = 1024
 
 
 class Tarot(commands.GroupCog, group_name="tarot", group_description="Draw Tarot with Wilhelmina."):
@@ -89,6 +90,13 @@ class Tarot(commands.GroupCog, group_name="tarot", group_description="Draw Tarot
         )
 
 
+def _clip_field_value(value: str, *, limit: int = EMBED_FIELD_VALUE_LIMIT) -> str:
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 1].rstrip()}…"
+
+
 def _reading_embed(
     reading: tarot.TarotReading,
     interpretation: tarot.TarotInterpretation,
@@ -101,7 +109,7 @@ def _reading_embed(
     embed = embeds.system_embed(header=header, description=interpretation.text)
 
     if reading.question:
-        embed.add_field(name="Question", value=reading.question, inline=False)
+        embed.add_field(name="Question", value=_clip_field_value(reading.question), inline=False)
 
     for drawn in reading.cards:
         keywords = " · ".join(drawn.keywords)
