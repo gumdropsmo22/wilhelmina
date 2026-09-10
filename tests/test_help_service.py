@@ -15,9 +15,20 @@ def test_build_page_groups_public_commands():
     assert page.category == "divination"
     assert page.category_label == "Divination"
     assert [entry.path for entry in page.entries] == ["roll"]
-    assert "/tarot" not in page.coming_soon
+    assert "/tarot" in page.coming_soon
     assert "/readings" in page.coming_soon
     assert "/rituals" in page.coming_soon
+
+
+def test_live_command_root_is_removed_from_coming_soon():
+    entries = (
+        help_service.HelpEntry(path="tarot single", description="Draw one card.", category="divination"),
+        help_service.HelpEntry(path="tarot three", description="Draw three cards.", category="divination"),
+    )
+
+    page = help_service.build_page(entries, category="divination")
+    assert "/tarot" not in page.coming_soon
+    assert page.coming_soon == ("/readings", "/rituals")
 
 
 def test_unknown_category_falls_back_to_first_available():
