@@ -29,9 +29,10 @@ DEFAULT_CATEGORY_MAP = {
     "roll": "divination",
     "8ball": "divination",
     "fortune": "divination",
+    "tarot": "divination",
 }
 COMING_SOON = {
-    "divination": ("/tarot", "/readings", "/rituals"),
+    "divination": ("/readings", "/rituals"),
     "server": ("/broadcast",),
 }
 
