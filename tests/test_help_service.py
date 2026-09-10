@@ -15,7 +15,9 @@ def test_build_page_groups_public_commands():
     assert page.category == "divination"
     assert page.category_label == "Divination"
     assert [entry.path for entry in page.entries] == ["roll"]
-    assert "/tarot" in page.coming_soon
+    assert "/tarot" not in page.coming_soon
+    assert "/readings" in page.coming_soon
+    assert "/rituals" in page.coming_soon
 
 
 def test_unknown_category_falls_back_to_first_available():
