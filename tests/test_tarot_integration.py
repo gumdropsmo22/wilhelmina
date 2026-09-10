@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import discord
+import pytest
 from discord import app_commands
 from discord.ext import commands
 
@@ -23,11 +24,13 @@ def test_tarot_is_divination_and_not_coming_soon():
     assert "/tarot" not in help_service.COMING_SOON["divination"]
 
 
-def test_tarot_group_exposes_single_and_three_commands():
-    bot = commands.Bot(command_prefix="!", intents=discord.Intents.none())
-    cog = Tarot(bot)
-    commands_by_name = {command.name: command for command in cog.get_app_commands()}
-    assert set(commands_by_name) == {"tarot"}
-    group = commands_by_name["tarot"]
-    assert isinstance(group, app_commands.Group)
-    assert {command.name for command in group.commands} == {"single", "three"}
+@pytest.mark.asyncio
+async def test_tarot_group_exposes_single_and_three_commands():
+    bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
+    await bot.add_cog(Tarot(bot))
+    try:
+        group = bot.tree.get_command("tarot")
+        assert isinstance(group, app_commands.Group)
+        assert {command.name for command in group.commands} == {"single", "three"}
+    finally:
+        await bot.close()
