@@ -32,7 +32,7 @@ DEFAULT_CATEGORY_MAP = {
     "tarot": "divination",
 }
 COMING_SOON = {
-    "divination": ("/readings", "/rituals"),
+    "divination": ("/tarot", "/readings", "/rituals"),
     "server": ("/broadcast",),
 }
 
@@ -136,6 +136,20 @@ def available_categories(entries: tuple[HelpEntry, ...]) -> tuple[str, ...]:
     return tuple(ordered)
 
 
+def _coming_soon_for(
+    category: str,
+    entries: tuple[HelpEntry, ...],
+) -> tuple[str, ...]:
+    """Hide sealed-door labels once the corresponding command root is actually live."""
+
+    live_roots = {entry.path.split(" ", 1)[0] for entry in entries}
+    return tuple(
+        path
+        for path in COMING_SOON.get(category, ())
+        if path.lstrip("/").split(" ", 1)[0] not in live_roots
+    )
+
+
 def build_page(
     entries: tuple[HelpEntry, ...],
     *,
@@ -155,7 +169,7 @@ def build_page(
         category=selected,
         category_label=CATEGORY_LABELS.get(selected, selected.replace("_", " ").title()),
         entries=filtered[start : start + per_page],
-        coming_soon=COMING_SOON.get(selected, ()),
+        coming_soon=_coming_soon_for(selected, entries),
         page=safe_page,
         total_pages=total_pages,
     )
