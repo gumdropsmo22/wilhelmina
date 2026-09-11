@@ -19,6 +19,7 @@ cogs.core               /about, /uptime
 cogs.admin              /admin diagnostics, /admin features, /admin sync, /admin config ...
 cogs.help               /help
 cogs.rules              /rules, /rules-admin ...
+cogs.welcome            automatic configured-channel join greeting
 cogs.memory_admin       /memory-admin ...
 cogs.memory_extraction  interaction-scoped automatic Memory Ledger extraction
 cogs.chat               memory-aware direct-interaction chat with bounded local continuity
@@ -26,6 +27,7 @@ cogs.invite             /invite
 cogs.roll               /roll
 cogs.eight_ball         /8ball
 cogs.fortune            /fortune
+cogs.tarot              /tarot single, /tarot three
 cogs.broadcasts         /broadcast-admin ...
 ```
 
@@ -36,6 +38,7 @@ Each optional feature has its own flag:
 ```env
 ENABLE_HELP=true
 ENABLE_RULES=true
+ENABLE_WELCOME=false
 ENABLE_MEMORY_ADMIN=true
 ENABLE_MEMORY_EXTRACTION=false
 ENABLE_CHAT=false
@@ -43,6 +46,7 @@ ENABLE_INVITE=false
 ENABLE_ROLL=false
 ENABLE_EIGHT_BALL=false
 ENABLE_FORTUNE=false
+ENABLE_TAROT=false
 ENABLE_BROADCASTS=false
 ```
 
@@ -156,9 +160,26 @@ The stored guild configuration is the source of truth for server role/channel ID
 
 ## Living Command Grimoire
 
-`/help` opens Wilhelmina's dynamic public command grimoire. It reads the live slash-command tree, hides admin tooling, groups public commands into categories, and can show sealed future doors such as tarot, readings, rituals, welcome, and broadcast.
+`/help` opens Wilhelmina's dynamic public command grimoire. It reads the live slash-command tree, hides admin tooling, groups public commands into categories, and can show sealed future doors. Tarot remains a sealed `/tarot` door while `ENABLE_TAROT=false`; once the Tarot cog is enabled, its real commands replace that sealed entry. `/readings`, `/rituals`, and `/broadcast` remain future doors where applicable. Welcome is event-driven and is not advertised as a slash command.
 
 The grimoire uses the Persona Engine's `help` feature profile for short AI-polished intro text when `OPENAI_API_KEY` is configured. If AI is unavailable, it falls back to deterministic copy.
+
+## Tarot
+
+`cogs.tarot` implements the first approved Tarot tranche and is disabled by default with `ENABLE_TAROT=false` until final rollout.
+
+```txt
+/tarot single
+/tarot three
+```
+
+Both commands accept an optional question and a Public/Private visibility choice. Private readings use Discord ephemeral interaction responses. Single-card readings draw one card; three-card readings draw three distinct cards in Past / Present / Future order. Reversals are enabled by default.
+
+Card selection and orientation are authoritative local application logic using `SystemRandom`; OpenAI receives the frozen draw only for interpretation and cannot redraw or flip cards. Provider failure preserves the same draw and falls back to local card meanings instead of failing the reading.
+
+Custom Tarot artwork is optional. Text-only readings remain fully functional with no image assets. Stable card artwork keys support later PNG/JPG/WEBP files, and the optional `tarot-art` dependency can rotate reversed artwork when available. No Tarot-specific history, automatic memory, daily-card system, larger spread, or alternative deck is added by this tranche.
+
+See `docs/tarot.md` for the feature contract and deferred live-validation checklist.
 
 ## Covenant Gate rules UI
 
@@ -345,7 +366,7 @@ rules_intro          /rules intro copy
 rules_acceptance     rules acceptance copy
 admin                admin/status copy hooks
 fortune              /fortune
-welcome              future welcome messages
+welcome              configured join greeting
 chat                 Phase-6 chat response profile
 broadcast_morning    The Vanguard Frequency generation
 broadcast_evening    W.W.N. Broadcast generation
@@ -357,7 +378,7 @@ The `chat` profile supplies the live Phase-6 response ceiling and fallback while
 
 ## AI-backed features
 
-`/8ball`, `/fortune`, `/help`, `/rules`, and `/broadcast-admin preview/send-test` can use AI first when `OPENAI_API_KEY` is configured, then fall back to static or stored responses if AI is unavailable.
+`/8ball`, `/fortune`, `/help`, `/rules`, `/tarot`, and `/broadcast-admin preview/send-test` can use AI first when `OPENAI_API_KEY` is configured, then fall back to static or stored/local responses if AI is unavailable. Tarot's locally selected draw remains authoritative even when interpretation falls back.
 
 Automatic Memory Ledger extraction uses the private structured-memory provider path and fails closed if the required private retention configuration is unavailable. It has no static fallback that persists guessed memories.
 
@@ -402,6 +423,7 @@ Optional cogs:
 ```env
 ENABLE_HELP=true
 ENABLE_RULES=true
+ENABLE_WELCOME=false
 ENABLE_MEMORY_ADMIN=true
 ENABLE_MEMORY_EXTRACTION=false
 ENABLE_CHAT=false
@@ -409,5 +431,6 @@ ENABLE_INVITE=false
 ENABLE_ROLL=false
 ENABLE_EIGHT_BALL=false
 ENABLE_FORTUNE=false
+ENABLE_TAROT=false
 ENABLE_BROADCASTS=false
 ```
