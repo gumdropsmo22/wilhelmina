@@ -80,6 +80,12 @@ COG_FLAGS: tuple[CogFlag, ...] = (
         description="Covenant Gate rules UI and acceptance tracking.",
     ),
     CogFlag(
+        extension="cogs.welcome",
+        env_var="ENABLE_WELCOME",
+        default_enabled=False,
+        description="Configured-channel Wilhelmina greeting for new home-guild members.",
+    ),
+    CogFlag(
         extension="cogs.memory_admin",
         env_var="ENABLE_MEMORY_ADMIN",
         default_enabled=True,
@@ -350,6 +356,7 @@ ENABLE_CORE = _get_bool_or_default("ENABLE_CORE", default=True)
 ENABLE_ADMIN = _get_bool_or_default("ENABLE_ADMIN", default=True)
 ENABLE_HELP = _get_bool_or_default("ENABLE_HELP", default=True)
 ENABLE_RULES = _get_bool_or_default("ENABLE_RULES", default=True)
+ENABLE_WELCOME = _get_bool_or_default("ENABLE_WELCOME", default=False)
 ENABLE_MEMORY_ADMIN = _get_bool_or_default("ENABLE_MEMORY_ADMIN", default=True)
 ENABLE_MEMORY_EXTRACTION = _get_bool_or_default("ENABLE_MEMORY_EXTRACTION", default=False)
 ENABLE_CHAT = _get_bool_or_default("ENABLE_CHAT", default=False)

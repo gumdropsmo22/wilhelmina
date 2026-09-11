@@ -26,7 +26,7 @@ def build_intents(settings: RuntimeSettings) -> discord.Intents:
     """Build Discord gateway intents from enabled features."""
 
     intents = discord.Intents.default()
-    if settings.is_cog_enabled("cogs.rules"):
+    if settings.is_cog_enabled("cogs.rules") or settings.is_cog_enabled("cogs.welcome"):
         intents.members = True
     if settings.is_cog_enabled("cogs.memory_extraction") or settings.is_cog_enabled(
         "cogs.chat"
