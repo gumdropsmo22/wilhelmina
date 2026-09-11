@@ -285,7 +285,7 @@ Memory may represent:
 - Impression;
 - Gossip.
 
-These concepts remain useful **internal memory/evidence distinctions**. They are not a user-facing truthfulness mandate and must not force Wilhelmina to sound like a cautious fact-checker in ordinary social chat.
+These concepts remain useful **internal memory/evidence distinctions**. They are not a user-facing truthfulness mandate and must not force Wilhelmina to sound like a cautious fact-checker in ordinary user-facing social chat.
 
 Where a record is stored as Gossip, the ledger may retain attribution/unverified bookkeeping. User-facing chat is nevertheless allowed to play loosely with ordinary social claims, contradictions, attribution, and recall when doing so serves the approved chaotic character.
 
@@ -835,8 +835,8 @@ The current broad build sequence is:
 3. Memory administration — completed.
 4. Automatic memory extraction — **MERGED** into `main`.
 5. Context intelligence / retrieval — **MERGED** into `main`.
-6. Wilhelmina's memory-aware chat brain — **Phases 6A–6C MERGED** into `main`; **Phase 6D BUILT + TESTED + REVIEW BLOCKERS RESOLVED, awaiting explicit merge authorization**. Live Discord/provider validation is **not** the immediate next step and is deliberately deferred until the remaining planned feature work and final integration/hardening are complete.
-7. Remaining experience features and final operational hardening/readiness. After Phase 6D lands, resume the unfinished feature docket (including Welcome and Tarot/Readings, plus other approved experience work) before project-wide live validation/deployment.
+6. Wilhelmina's memory-aware chat brain — **Phases 6A–6D MERGED** into `main`. Live Discord/provider validation remains deliberately deferred until the remaining approved feature work and final integration/hardening are complete.
+7. Remaining experience features and final operational hardening/readiness — **Welcome and Tarot MERGED** into `main`. Continue the approved experience-feature docket with **Readings next, then Rituals**, before project-wide live validation/deployment.
 
 Additional work required before or alongside later phases includes:
 
