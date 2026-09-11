@@ -99,6 +99,8 @@ tests = pass
 | Pagination buttons | next/previous work; disabled at edges | Pending final test |
 | Admin commands hidden | admin-only commands do not appear in public help | Pending final test |
 | Optional disabled commands | hidden or shown only as intended future sealed doors | Pending final test |
+| Tarot disabled | `/tarot` remains a sealed future door while `ENABLE_TAROT=false` | Pending final test |
+| Tarot enabled | real `/tarot single` and `/tarot three` entries replace the sealed `/tarot` door | Pending final test |
 | AI unavailable fallback | deterministic intro appears | Pending final test |
 | AI available intro | short persona-polished line appears without listing commands | Pending final test |
 
@@ -119,6 +121,19 @@ tests = pass
 | Restart persistence | published panel and acceptance state still work after restart where supported | Pending final test |
 | Role mutation boundary | accepting rules does not assign roles yet | Pending final test |
 
+## Welcome join flow
+
+| Flow/Setting | Checks | Status |
+|---|---|---|
+| `ENABLE_WELCOME=true` | `cogs.welcome` loads and requests the Discord Members intent | Pending final test |
+| Human joins `HOME_GUILD_ID` | one greeting is posted in configured `welcome_channel_id` | Pending final test |
+| Member targeting | greeting includes the joining member mention outside generated copy | Pending final test |
+| AI unavailable | deterministic Welcome fallback is used | Pending final test |
+| Welcome channel unset/unavailable | join does not crash or mutate unrelated state | Pending final test |
+| Bot account joins | no Welcome greeting is posted | Pending final test |
+| Wrong-guild join | no Welcome greeting is posted | Pending final test |
+| Boundary check | Welcome does not DM, assign roles, accept the Covenant, mutate onboarding, or create profile fields | Pending final test |
+
 ## Invite helper
 
 | Command | Checks | Status |
@@ -137,6 +152,27 @@ tests = pass
 | `/fortune` | returns fortune-cookie-style output; fallback works if AI unavailable | Pending final test |
 | Optional feature flags | disabled divination cogs do not load commands | Pending final test |
 | Legacy `ENABLE_ORACLES` shim | enables old split commands only as expected | Pending final test |
+
+## Tarot
+
+| Command/Flow | Checks | Status |
+|---|---|---|
+| `ENABLE_TAROT=true` | `cogs.tarot` loads and both Tarot subcommands sync | Pending final test |
+| `/tarot single` | draws exactly one valid card | Pending final test |
+| `/tarot three` | draws exactly three distinct cards in Past / Present / Future order | Pending final test |
+| Reversals | upright/reversed orientation is assigned and displayed for every draw | Pending final test |
+| Optional question | blank question gives a general reading; supplied question reaches interpretation | Pending final test |
+| Long displayed question | presentation clips safely without changing the question used for interpretation | Pending final test |
+| Public visibility | reading posts normally to the invoking channel | Pending final test |
+| Private visibility | reading is delivered ephemerally to the invoking member | Pending final test |
+| Frozen draw | OpenAI interpretation cannot redraw, reorder, or change orientations | Pending final test |
+| AI unavailable/fails | the same frozen cards remain and local keyword fallback is returned | Pending final test |
+| No duplicate within spread | a three-card reading cannot contain the same card identity twice | Pending final test |
+| Fresh independent readings | later readings start again from the full 78-card deck; prior cards are not artificially suppressed | Pending final test |
+| No artwork installed | full text-only Tarot reading still works | Pending final test |
+| Artwork present | mapped PNG/JPG/WEBP assets display without changing core draw behavior | Pending final test |
+| Reversed artwork | rotates when optional artwork dependency supports it; otherwise reversal remains clear in text | Pending final test |
+| Persistence boundary | Tarot does not create saved reading history or automatic memory records | Pending final test |
 
 ## Persona Engine regression checks
 
@@ -242,11 +278,10 @@ These are placeholders. Expand them when the feature actually exists.
 
 | Future area | Testing notes to add later |
 |---|---|
-| Welcome messages | join flow, configured channel, role/state assumptions, fallback copy |
 | Role automation | rules acceptance consumption, permission safety, idempotent role assignment |
-| Tarot/readings/rituals | command flow, AI fallback, tone boundaries, cooldowns if added |
-| AI chat/open chat | channel gating, prompt boundaries, memory policy, abuse limits |
-| Memory/ledger | opt-in/out behavior, stored data review, deletion, privacy boundaries |
+| Readings/rituals expansion | command flow, AI fallback, tone boundaries, feature-specific behavior |
+| AI chat/open chat expansion | any future approved surfaces beyond the existing direct-interaction chat contract |
+| Memory/ledger expansion | future approved personality-analysis or ambient-memory work |
 | Reminders/scheduler expansion | timezone behavior, duplicate prevention, missed-run handling |
 
 ## Final sign-off template
@@ -269,8 +304,10 @@ Manual Discord checks:
 - Admin/config:
 - Help:
 - Rules:
+- Welcome:
 - Invite:
 - Divination:
+- Tarot:
 - Persona:
 - Broadcasts:
 

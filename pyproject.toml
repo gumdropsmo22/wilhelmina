@@ -18,6 +18,9 @@ dependencies = [
 ai = [
   "openai>=1.0,<2.0",
 ]
+tarot-artwork = [
+  "Pillow>=10.0,<13.0",
+]
 dev = [
   "pytest>=8.0,<10.0",
   "pytest-asyncio>=0.24,<2.0",
@@ -48,4 +51,3 @@ ignore = []
 
 [tool.ruff.format]
 docstring-code-format = true
-

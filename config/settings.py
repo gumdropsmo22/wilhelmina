@@ -128,6 +128,12 @@ COG_FLAGS: tuple[CogFlag, ...] = (
         description="Fortune-cookie style generated message command.",
     ),
     CogFlag(
+        extension="cogs.tarot",
+        env_var="ENABLE_TAROT",
+        default_enabled=False,
+        description="Single-card and Past/Present/Future Tarot readings.",
+    ),
+    CogFlag(
         extension="cogs.broadcasts",
         env_var="ENABLE_BROADCASTS",
         default_enabled=False,
@@ -364,6 +370,7 @@ ENABLE_INVITE = _get_bool_or_default("ENABLE_INVITE", default=False)
 ENABLE_ROLL = _get_bool_or_default("ENABLE_ROLL", default=False)
 ENABLE_EIGHT_BALL = _get_bool_or_default("ENABLE_EIGHT_BALL", default=False)
 ENABLE_FORTUNE = _get_bool_or_default("ENABLE_FORTUNE", default=False)
+ENABLE_TAROT = _get_bool_or_default("ENABLE_TAROT", default=False)
 ENABLE_BROADCASTS = _get_bool_or_default("ENABLE_BROADCASTS", default=False)
 
 # Legacy flag retained only as a compatibility shim. Do not use for new configuration.
