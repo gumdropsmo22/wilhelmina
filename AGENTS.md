@@ -518,7 +518,127 @@ Do not revive:
 - `utils.persona`;
 - an Oracle umbrella architecture.
 
-8-ball, roll, fortune-cookie fortune, tarot/readings, broadcasts, and other distinct experiences remain distinct features unless the product owner explicitly combines them.
+8-ball, roll, fortune-cookie fortune, Tarot, scheduled broadcasts, Welcome, chat, and other distinct approved experiences remain distinct features unless the product owner explicitly combines them.
+
+Names such as `Readings` or `Rituals` do not become features merely because they appeared in an old roadmap, a help-screen sealed door, a test placeholder, or historical architecture. See the canonical inventory below.
+
+# 16A. Canonical feature inventory and docket authority
+
+This section is the canonical inventory for deciding **what Wilhelmina actually has, what is merely infrastructure, what is a future direction, and what is only an old or undefined name**.
+
+It does not replace the status vocabulary in section 22. It prevents stale planning language from being mistaken for product approval.
+
+A name appearing in any of the following is **not enough** to make it a feature or put it on the build docket:
+
+- a sealed `Coming Soon` door in `/help`;
+- an old roadmap or technical report;
+- archived Node code;
+- a historical branch or PR;
+- a testing-checklist placeholder;
+- a proposed directory/cog name;
+- a persona/profile label;
+- an agent recommendation.
+
+A sealed door is presentation copy, **not roadmap authority**. A placeholder may become a real feature only after the product owner defines and approves its user-facing behavior. If a placeholder is intentionally abandoned, remove the stale door/reference during the same cleanup rather than leaving it around to resurrect itself later.
+
+`docs/technical-report.md` contains valuable project history but predates major architecture/product decisions. Where it conflicts with current `AGENTS.md`, current approved docs, or current implementation, treat its old feature proposals as historical rather than canonical.
+
+## 16A.1 MERGED product features and experiences
+
+These are real features in `main`. Some are disabled by default behind feature flags, but they are implemented product behavior rather than ideas.
+
+| Feature | What it actually means | Current authority/status |
+|---|---|---|
+| Core runtime/health | `/about`, `/uptime`, required bot runtime basics | **MERGED** |
+| Admin/control plane | diagnostics, feature inspection, command sync, setup/configuration controls | **MERGED** |
+| Living Command Grimoire | dynamic `/help`, categories, pagination, public/private display, live command discovery | **MERGED** |
+| Covenant Gate | `/rules` plus private `/rules-admin` versioning, publishing and acceptance tracking | **MERGED** |
+| Coven Registry | durable home-guild membership records, public registry cards/index, join/archive/induction state and registry admin controls | **MERGED**; loaded with Covenant Gate |
+| Member Identity / induction profile | private preferred name + full birth date, locally derived age, identity admin surface, Covenant-linked induction modal | **MERGED**; under-18 behavior remains **PRODUCT DECISION PENDING** |
+| Invite helper | `/invite` authorization/install helper | **MERGED** |
+| Roll | `/roll` dice experience | **MERGED** |
+| Magic 8-Ball | `/8ball` question/answer experience | **MERGED** |
+| Fortune | `/fortune` fortune-cookie-style experience | **MERGED** |
+| Memory Administration | private `/memory-admin` operating surface for the Memory Ledger | **MERGED** |
+| Memory-aware Chat | direct-interaction conversation in approved DMs/designated chat/mention/reply surfaces with bounded local continuity and authorized memory context | **MERGED**; disabled by default until rollout |
+| Scheduled Daily Broadcasts | automatic morning **The Vanguard Frequency** and evening **W.W.N. Broadcast**, controlled through `/broadcast-admin` | **MERGED** |
+| Welcome | automatic configured-channel greeting for a human member joining the home guild | **MERGED**; event-driven, **not** a `/welcome` command |
+| Tarot | `/tarot single` and `/tarot three`; local 78-card draw, reversals, Past/Present/Future, public/private response, optional question, AI interpretation and fallback | **MERGED**; artwork optional; disabled by default until rollout |
+
+## 16A.2 MERGED supporting systems — not separate feature-docket items
+
+These systems are real and important, but do not count them as extra user experiences when making the feature list.
+
+| Supporting system | Role |
+|---|---|
+| Dedicated-server runtime, feature flags and command-sync machinery | boots and gates the product |
+| SQLite persistence, guild configuration, audit log and migrations | canonical local operational state |
+| Persona Engine / feature profiles | keeps Wilhelmina's voice coherent across features; replaces the old `Voice Channels` concept |
+| Shared OpenAI provider boundary | common async AI integration; models are not canonical application state |
+| Onboarding-state foundation | stores onboarding workflow state/history; **not** by itself a finished automated onboarding/role-assignment feature |
+| Memory Ledger | durable evidence-backed structured memory |
+| Automatic Memory Extraction | interaction-scoped background extraction into the Ledger; disabled by default |
+| Context Intelligence | deterministic authorized memory retrieval/assembly for conversation |
+| Chat continuity and hostile-hardening layers | bounded recent context, concurrency/deduplication and credential/output boundaries supporting Chat |
+| Tarot artwork adapter | optional presentation hook; Tarot remains complete without images |
+
+## 16A.3 Intended directions that are not build-ready features
+
+These have real project intent behind them, but they are **not automatically the next implementation tranche**.
+
+| Direction | Status / rule |
+|---|---|
+| Evolving evidence-backed personality/social analysis | Long-term intended direction. Requires deliberate product design and any applicable platform-policy review before implementation/release. Do not silently turn the current Memory Ledger into a permanent psychological dossier. |
+| Broad ambient server-memory collection | Separate capability from interaction-scoped extraction. Do not activate, remove, or redesign it without explicit owner approval and required platform configuration. |
+| Final operational hardening, deployment and live Discord/provider validation | Required project workstream, **not a product feature**. Live validation remains the final project-wide proving stage after approved feature work. |
+
+## 16A.4 Undefined placeholders — no build authority
+
+These names exist somewhere in current or historical project material, but **their product behavior is not currently defined/approved**. Do not schedule or implement them merely because the name exists.
+
+| Placeholder/candidate | Why it is not currently a feature |
+|---|---|
+| `/readings` / `Readings` | No approved behavior contract. May be redundant with Tarot unless the owner defines a distinct experience. |
+| `/rituals` / `Rituals` | No approved behavior contract. The name also descends from old persona/scheduler terminology, which is not a product definition. |
+| Public `/broadcast` sealed door | Scheduled Daily Broadcasts already exist through `/broadcast-admin`; no separate public `/broadcast` behavior has been approved. |
+| Role automation | Mentioned as later testing work, but no current approved role-assignment product contract. Welcome explicitly does not assign roles. |
+| Reminders / scheduler expansion | Historical/future placeholder; no approved reminder UX or scheduler product contract. |
+| Chat/open-chat expansion | The current direct-interaction Chat contract is real; any broader surface beyond it requires separate approval. |
+| Memory/Ledger expansion | Generic placeholder only. Specific changes such as ambient collection or personality analysis must follow their own product decisions rather than inheriting authority from this label. |
+| Image-generation command | Appears in historical volatile scope; no current command/UX/provider/storage contract is approved. |
+| Voice interactions / voice-activity trigger | Historical concept only; no current approved experience. |
+| Mood collection / Mood Layer | Historical/potential concept only; no current approved experience. |
+| Command Concierge | Old optional Grimoire enhancement idea; not approved scope. |
+| Trial of Entry | Old optional Covenant/onboarding enhancement idea; not approved scope. |
+| Trial/game/event modules | Historical vague placeholder; not approved scope. |
+| Lore Bible / Visual Identity System | Creative/design tracks, not standalone runtime features. They may support real features without becoming commands or docket items themselves. |
+
+## 16A.5 Superseded or retired concepts — do not revive by accident
+
+These have been replaced, rejected, or made obsolete by later decisions.
+
+- **Oracle umbrella / `cogs.oracles`:** replaced by independent feature cogs. `ENABLE_ORACLES` survives only as a compatibility shim for the older split commands; it is not a feature umbrella.
+- **Old persona `Voice Channels` (`Guide`, `Ritual`, `Oracle`, `Administrative`, `Welcome`) and `utils.persona`:** replaced by the current Persona Engine and feature profiles. The word `Ritual` in that old architecture does not establish a Rituals feature.
+- **Generic scheduler umbrella:** scheduled broadcasts have their own implementation. Old proposals that bundled broadcasts, reminders and rituals into one scheduler do not define those other products.
+- **Manual AI Broadcasts as the next standalone target:** superseded by the automatic Scheduled Daily Broadcast system.
+- **`/welcome` slash command:** Welcome is an automatic join event; do not create a slash command merely because old help copy once implied one.
+- **Existing-server takeover/transformation, automatic channel archival/creation, or automatic server restructuring:** rejected by the current dedicated-server runtime model. Do not revive from historical server-init proposals.
+- **Old default DM/pending-role onboarding architecture:** historical proposal, not the current induction contract. Any future role automation or onboarding expansion requires a fresh approved design.
+- **`adult_memory_consent` / exact `memory_consent_version` authorization:** removed accidental architecture; do not revive under another name.
+- **Old Tarot `custom` layout, daily-card behavior, saved Tarot history, alternative decks, larger spreads and similar historical ideas:** not part of the approved Tarot tranche. They require explicit future approval rather than inheritance from old technical reports.
+
+## 16A.6 Docket rule
+
+There is currently **no automatic next experience feature** after Welcome and Tarot.
+
+In particular:
+
+- `/readings` is not “next” merely because it is a sealed door;
+- `/rituals` is not “after Readings” merely because old docs listed the names together;
+- `/broadcast` is not a missing feature merely because the help service contains a future-door label;
+- historical image, voice, mood, reminder, trial, onboarding or scheduler proposals are not queued work until the owner chooses and defines them.
+
+Before beginning a new feature tranche, compare it against this inventory and obtain/record the product owner's definition. Once approved, move it out of `Undefined placeholders` and document its real scope before implementation.
 
 # 17. OpenAI integration
 
@@ -836,7 +956,7 @@ The current broad build sequence is:
 4. Automatic memory extraction — **MERGED** into `main`.
 5. Context intelligence / retrieval — **MERGED** into `main`.
 6. Wilhelmina's memory-aware chat brain — **Phases 6A–6D MERGED** into `main`. Live Discord/provider validation remains deliberately deferred until the remaining approved feature work and final integration/hardening are complete.
-7. Remaining experience features and final operational hardening/readiness — **Welcome and Tarot MERGED** into `main`. Continue the approved experience-feature docket with **Readings next, then Rituals**, before project-wide live validation/deployment.
+7. Remaining experience features and final operational hardening/readiness — **Welcome and Tarot MERGED** into `main`. There is **no automatically approved next experience feature**. `/readings` and `/rituals` are undefined placeholders, not docket authority. Select subsequent feature work only after the product owner defines/approves it and the canonical inventory in section 16A is updated.
 
 Additional work required before or alongside later phases includes:
 
@@ -844,7 +964,7 @@ Additional work required before or alongside later phases includes:
 - aligning persona/privacy/product doctrine;
 - deliberately designing the evolving personality-analysis layer;
 - resolving explicit product decisions such as the current project-level 18+ gate;
-- production deployment, backups, monitoring, recovery, and **live validation as the final project-wide proving stage after the remaining feature build is complete**.
+- production deployment, backups, monitoring, recovery, and **live validation as the final project-wide proving stage after the remaining approved feature build is complete**.
 
 Do not skip dependency order merely because a later feature is more exciting unless the product owner explicitly approves parallel work.
 
