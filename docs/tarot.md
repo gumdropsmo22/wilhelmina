@@ -1,6 +1,6 @@
 # Tarot
 
-Status: **BUILT on feature branch; live Discord/provider validation remains deferred.**
+Status: **MERGED into `main` (PR #51); automated tests exist; live Discord/provider validation remains deferred.**
 
 Tarot is a standalone divination feature. It does not belong to the legacy Oracle umbrella and it does not persist reading history or automatically create Memory Ledger records.
 
@@ -51,7 +51,7 @@ Without Pillow, reversed readings still work and are clearly labelled `Reversed`
 
 ## Deferred work
 
-The first Tarot tranche intentionally does not add saved reading history, automatic memory of readings, daily cards, Celtic Cross or larger spreads, alternative decks, DMs, elaborate animation, `/readings` behavior, or `/rituals` behavior.
+The first Tarot tranche intentionally does not add saved reading history, automatic memory of readings, daily cards, Celtic Cross or larger spreads, alternative decks, DMs, elaborate animation.
 
 Custom artwork can be added later without changing the deck or interpretation engine.
 

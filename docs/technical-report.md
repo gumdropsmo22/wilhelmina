@@ -1,3 +1,5 @@
+> **HISTORICAL TECHNICAL DESIGN — NON-CANONICAL.** This report preserves an earlier architecture and proposed features; many implementation/status statements below are outdated. For actual current code, feature decisions and roadmap, use `AGENTS.md` (especially section 16A), `README.md`, and current feature-specific docs. In particular, its Image Module is a historical design sketch for an **unbuilt** feature candidate, not a live command or a finalized owner-approved UX.
+
 # Wilhelmina Discord Bot Technical Report
 
 ## 1. Project Identification

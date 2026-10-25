@@ -279,7 +279,6 @@ These are placeholders. Expand them when the feature actually exists.
 | Future area | Testing notes to add later |
 |---|---|
 | Role automation | rules acceptance consumption, permission safety, idempotent role assignment |
-| Readings/rituals expansion | command flow, AI fallback, tone boundaries, feature-specific behavior |
 | AI chat/open chat expansion | any future approved surfaces beyond the existing direct-interaction chat contract |
 | Memory/ledger expansion | future approved personality-analysis or ambient-memory work |
 | Reminders/scheduler expansion | timezone behavior, duplicate prevention, missed-run handling |

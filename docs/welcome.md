@@ -2,7 +2,7 @@
 
 ## Status
 
-BUILT on the Welcome feature branch. Automated validation is required before merge. Live Discord validation is intentionally deferred to the final whole-project testing phase.
+MERGED into `main` (PR #50); automated tests exist. Live Discord validation is intentionally deferred to the final whole-project testing phase.
 
 ## Product behavior
 

@@ -1,6 +1,16 @@
 # Wilhelmina Bot
 
-Wilhelmina is a Python Discord bot built with `discord.py` for a dedicated home server. The project is moving toward modular onboarding, AI-backed interactions, administrative tools, scheduled messaging, and server community workflows.
+Wilhelmina is a Python Discord bot built with `discord.py` for one small, private dedicated home server. Its modular runtime, Registry, Covenant, member identity, Memory Ledger, automatic memory extraction, memory-aware Chat, Welcome, Tarot and scheduled broadcasts are merged into `main` but **not yet collectively live-validated**.
+
+## Current status and where to resume
+
+- **Canonical product inventory and engineering rules:** `AGENTS.md` sections 16A and 28. Consult those before proposing new feature work.
+- **Built/merged, not final-live-validated:** core/admin/help, Covenant Gate, Registry, member identity, Memory Ledger and extraction, memory-aware Chat, Welcome, Tarot, divination commands and automated Daily Broadcasts. Many optional features intentionally default to disabled.
+- **Still unbuilt:** evolving personality/social analysis and Image Generation. The latter has a historical Image Module concept in `docs/technical-report.md`, not a current finalized command contract.
+- **Owner decision pending:** existing under-18 induction gate. Optional ambient server collection/participation is separate and not approved by default.
+- **Launch work remaining:** finish broadcast news/astronomy feed setup, Discord intents and permissions, private OpenAI retention posture, feature flags, backups/recovery and full end-to-end Discord/provider validation.
+- **Retired feature labels:** standalone `/readings`, `/rituals`, public `/broadcast`, and generic Trial/game/event modules. Real `/broadcast-admin` and `/tarot` remain.
+- **Final QA checklist:** `docs/testing_phase_checklist.md`. **Historical/non-canonical technical design:** `docs/technical-report.md`. PR merges and automated CI do not equal live Discord validation.
 
 ## Runtime model
 
@@ -160,7 +170,7 @@ The stored guild configuration is the source of truth for server role/channel ID
 
 ## Living Command Grimoire
 
-`/help` opens Wilhelmina's dynamic public command grimoire. It reads the live slash-command tree, hides admin tooling, groups public commands into categories, and can show sealed future doors. Tarot remains a sealed `/tarot` door while `ENABLE_TAROT=false`; once the Tarot cog is enabled, its real commands replace that sealed entry. `/readings`, `/rituals`, and `/broadcast` remain future doors where applicable. Welcome is event-driven and is not advertised as a slash command.
+`/help` opens Wilhelmina's dynamic public command grimoire. It reads the live slash-command tree, hides admin tooling, groups public commands into categories, and can show sealed future doors. Tarot remains a sealed `/tarot` door while `ENABLE_TAROT=false`; once the Tarot cog is enabled, its real commands replace that sealed entry. Retired labels (`/readings`, `/rituals`, and public `/broadcast`) are not displayed as future doors. Welcome is event-driven and is not advertised as a slash command.
 
 The grimoire uses the Persona Engine's `help` feature profile for short AI-polished intro text when `OPENAI_API_KEY` is configured. If AI is unavailable, it falls back to deterministic copy.
 
