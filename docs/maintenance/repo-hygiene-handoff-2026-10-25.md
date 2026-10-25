@@ -10,7 +10,7 @@ This is a **dated operational record**, not a competing product roadmap. For liv
 - PR #55: removed retired Help sealed doors and corrected tests; **merged**, CI green.
 - PR #57: narrow runtime/SQLite/log/cache ignores and removed `repo-write-test.md`; **merged**, CI green.
 - PR #56: original attempt to copy 16 legacy scripts into active `archive/` passed CI but its merge was blocked by connector safety. **Closed, unmerged, superseded by #59.**
-- PR #59: **merged**, CI green. Removed all 16 superseded C3/C6 PowerShell/CMD/bootstrap files plus `bot.py.bak` from the active root without copying them into the current tree; original files remain available in the recovery branch and Git history. Added `archive/README.md` for recovery warnings.
+- PR #59: **merged**, CI green. Removed 16 superseded root-level files (C3/C6 PowerShell/CMD/bootstrap scripts and `bot.py.bak`) from the active checkout without copying them into the current tree; original files remain available in the recovery branch and Git history. Added `archive/README.md` for recovery warnings.
 - Issue #40 was triaged with a concrete audit comment; **kept open** pending assessment of its missing doctrine ADR/disclosure/reviewer tests.
 - PR #58: dated branch audit/handoff; **merged**, CI green. This follow-up updates its status after #59.
 - Remote branch deletion and `main` protection were not changed: the connected GitHub actions do not expose those mutations. **`main` remained unprotected on 2026-10-25**. These are outstanding manual GitHub administration items, not repo-code defects.
