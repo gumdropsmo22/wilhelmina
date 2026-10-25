@@ -32,8 +32,7 @@ DEFAULT_CATEGORY_MAP = {
     "tarot": "divination",
 }
 COMING_SOON = {
-    "divination": ("/tarot", "/readings", "/rituals"),
-    "server": ("/broadcast",),
+    "divination": ("/tarot",),
 }
 
 
