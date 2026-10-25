@@ -15,9 +15,7 @@ def test_build_page_groups_public_commands():
     assert page.category == "divination"
     assert page.category_label == "Divination"
     assert [entry.path for entry in page.entries] == ["roll"]
-    assert "/tarot" in page.coming_soon
-    assert "/readings" in page.coming_soon
-    assert "/rituals" in page.coming_soon
+    assert page.coming_soon == ("/tarot",)
 
 
 def test_live_command_root_is_removed_from_coming_soon():
@@ -28,7 +26,7 @@ def test_live_command_root_is_removed_from_coming_soon():
 
     page = help_service.build_page(entries, category="divination")
     assert "/tarot" not in page.coming_soon
-    assert page.coming_soon == ("/readings", "/rituals")
+    assert page.coming_soon == ()
 
 
 def test_unknown_category_falls_back_to_first_available():
@@ -45,3 +43,17 @@ def test_empty_entries_still_builds_page():
     assert page.category == "misc"
     assert page.total_pages == 1
     assert page.entries == ()
+
+
+def test_retired_standalone_commands_never_appear_as_future_doors():
+    entries = (
+        help_service.HelpEntry(path="fortune", description="Fortune.", category="divination"),
+        help_service.HelpEntry(path="rules", description="Rules.", category="server"),
+    )
+    divination = help_service.build_page(entries, category="divination")
+    server = help_service.build_page(entries, category="server")
+    assert "/tarot" in divination.coming_soon
+    for retired in ("/readings", "/rituals", "/broadcast"):
+        assert retired not in divination.coming_soon
+        assert retired not in server.coming_soon
+    assert server.coming_soon == ()
