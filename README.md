@@ -10,7 +10,7 @@ Wilhelmina is a Python Discord bot built with `discord.py` for one small, privat
 - **Owner decision pending:** existing under-18 induction gate. Optional ambient server collection/participation is separate and not approved by default.
 - **Launch work remaining:** finish broadcast news/astronomy feed setup, Discord intents and permissions, private OpenAI retention posture, feature flags, backups/recovery and full end-to-end Discord/provider validation.
 - **Retired feature labels:** standalone `/readings`, `/rituals`, public `/broadcast`, and generic Trial/game/event modules. Real `/broadcast-admin` and `/tarot` remain.
-- **Final QA checklist:** `docs/testing_phase_checklist.md`. **Historical/non-canonical technical design:** `docs/technical-report.md`. PR merges and automated CI do not equal live Discord validation.
+- **Repository cleanup/handoff:** `docs/maintenance/repo-hygiene-handoff-2026-10-25.md`. **Final QA checklist:** `docs/testing_phase_checklist.md`. **Historical/non-canonical technical design:** `docs/technical-report.md`. PR merges and automated CI do not equal live Discord validation.
 
 ## Runtime model
 
