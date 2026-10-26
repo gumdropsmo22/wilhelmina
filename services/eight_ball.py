@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 
 from services.ai import generate_text_async
+from services.persona import BASE_VOICE, GLOBAL_LIMITS
 
 INTENT_POOL = (["yes"] * 10) + (["no"] * 10) + (["maybe"] * 5) + (["ask-again"] * 5)
 
@@ -41,7 +42,7 @@ async def generate_answer(intent: str) -> str:
 
     intent = intent.lower()
     prompt = (
-        "You are Wilhelmina, a mystical digital witch.\n"
+        f"{BASE_VOICE}\n{GLOBAL_LIMITS}\n"
         f"Respond to a Magic 8-Ball question with one sentence implying: {intent.upper()}.\n"
         "Keep it eerie, sarcastic, or dramatic. Do not mention categories."
     )
@@ -49,6 +50,7 @@ async def generate_answer(intent: str) -> str:
     for _ in range(3):
         line = await generate_text_async(prompt)
         if _is_usable(line):
+            line = line[:600]
             _cache_response(line)
             return line
 

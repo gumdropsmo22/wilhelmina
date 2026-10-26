@@ -45,14 +45,10 @@ def test_future_birth_date_is_rejected() -> None:
         )
 
 
-def test_underage_identity_is_rejected() -> None:
-    with pytest.raises(MemberIdentityError, match="at least 18"):
-        MemberIdentity.create(
-            discord_display_name="Member",
-            preferred_name="Member",
-            birth_date="2010-01-01",
-            today=date(2026, 8, 6),
-        )
+def test_birthday_is_context_not_an_admission_gate() -> None:
+    identity = MemberIdentity.create(discord_display_name="Member", preferred_name="Member",
+                                     birth_date="2010-01-01", today=date(2026, 8, 6))
+    assert identity.age_on(date(2026, 8, 6)) == 16
 
 
 def test_names_are_normalized_but_remain_distinct() -> None:

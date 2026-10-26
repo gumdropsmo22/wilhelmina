@@ -81,7 +81,7 @@ async def build_rules_embed(
         fallback=rules.intro_text,
     )
     embed = discord.Embed(title=rules.title, description=intro, color=0x6E00FF)
-    embed.set_author(name="WILHELMINA • COVENANT GATE", icon_url="cdn/witch-sigil.png")
+    embed.set_author(name="WILHELMINA • COVENANT GATE")
     for index, chunk in enumerate(_chunk_text(rules.body_text), start=1):
         embed.add_field(name=f"Covenant {index}", value=chunk, inline=False)
     embed.set_footer(text=f"Rules version: {rules.version_tag} • haunt://coven/rules")
@@ -182,6 +182,10 @@ class RulesAdmin(commands.GroupCog, group_name="rules-admin"):
         self.bot = bot
 
     async def _guard(self, interaction: discord.Interaction) -> bool:
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        if not permissions or not permissions.manage_guild:
+            await interaction.response.send_message("Manage Server permission required.", ephemeral=True)
+            return False
         return await _guard_home_guild(interaction, self.bot)
 
     @app_commands.command(name="set", description="Create or update a server covenant version.")

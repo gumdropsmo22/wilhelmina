@@ -202,6 +202,17 @@ def delete_member_data(
     guild_id = int(guild_id)
     subject_user_id = int(subject_user_id)
 
+    # Revoke already-observed work in the same transaction as the purge.
+    # A provider result returning later must fail the worker's claim check.
+    if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_extraction_jobs'").fetchone():
+        connection.execute(
+            "UPDATE memory_extraction_jobs SET status='rejected', content=NULL, "
+            "claim_token=NULL, lease_expires_at=NULL, last_error_code='member_purged' "
+            "WHERE guild_id=? AND (subject_user_id=? OR author_user_id=?) "
+            "AND status IN ('pending','retry','processing')",
+            (guild_id, subject_user_id, subject_user_id),
+        )
+
     subject_memory_count = int(
         connection.execute(
             """

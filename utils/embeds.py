@@ -13,7 +13,7 @@ def system_embed(header: str = None, description: str = "", include_trace: bool 
     # Base embed with toxic violet color
     embed = discord.Embed(color=0x6E00FF, description=description)
     # Set author name and icon for system identity
-    embed.set_author(name="WILHELMINA • SYSTEM", icon_url="cdn/witch-sigil.png")
+    embed.set_author(name="WILHELMINA • SYSTEM")
     # If a header text is provided, use it as the embed title (glitchy ASCII header inside embed)
     if header:
         embed.title = header
@@ -35,5 +35,5 @@ def system_embed(header: str = None, description: str = "", include_trace: bool 
     # Timestamp (UTC) for system log style
     embed.timestamp = datetime.now(timezone.utc)
     # Footer with custom protocol URL and glitch icon
-    embed.set_footer(text="haunt://coven/wilhelmina", icon_url="cdn/glitch-dot.gif")
+    embed.set_footer(text="haunt://coven/wilhelmina")
     return embed

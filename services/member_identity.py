@@ -6,7 +6,6 @@ from datetime import date
 
 MAX_PREFERRED_NAME_LENGTH = 80
 MAX_DISPLAY_NAME_LENGTH = 100
-ADULT_AGE = 18
 
 
 class MemberIdentityError(ValueError):
@@ -98,14 +97,9 @@ class MemberIdentity:
         preferred_name: str,
         birth_date: str | date,
         today: date,
-        minimum_age: int = ADULT_AGE,
     ) -> "MemberIdentity":
         parsed_birth_date = parse_birth_date(birth_date)
-        age = calculate_age(parsed_birth_date, on_date=today)
-        if age < minimum_age:
-            raise MemberIdentityError(
-                f"member must be at least {minimum_age} years old for the adult server experience"
-            )
+        calculate_age(parsed_birth_date, on_date=today)
         return cls(
             discord_display_name=normalize_discord_display_name(discord_display_name),
             preferred_name=normalize_preferred_name(preferred_name),

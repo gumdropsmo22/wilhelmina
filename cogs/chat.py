@@ -303,6 +303,14 @@ class Chat(commands.Cog):
             )
 
     @commands.Cog.listener()
+    async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent) -> None:
+        home = getattr(self.bot.settings, "home_guild_id", None)
+        if home is None or (payload.guild_id is not None and int(payload.guild_id) != int(home)):
+            return
+        for message_id in payload.message_ids:
+            self.runtime.note_source_deleted(int(message_id))
+
+    @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
         home_guild_id = getattr(self.bot.settings, "home_guild_id", None)
         if home_guild_id is None:

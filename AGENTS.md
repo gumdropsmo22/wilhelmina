@@ -238,21 +238,9 @@ The previously implemented `adult_memory_consent` / exact `memory_consent_versio
 
 Do not reintroduce equivalent permission gates under a different name without explicit product approval.
 
-# 7. Age handling
+# 7. Birthday context; no product age gate
 
-The repository currently contains an under-18 induction gate.
-
-Its existence in code does **not** make it a permanent approved product requirement.
-
-Until the product owner explicitly resolves the question:
-
-- preserve the existing behavior only where necessary to avoid accidental unrelated breakage;
-- mark it as `PRODUCT DECISION PENDING` in planning/docs;
-- do not expand the age-gate architecture;
-- do not build new features that depend on the assumption that Wilhelmina's entire server/product is permanently 18+;
-- do not remove it destructively without an approved migration/change.
-
-External Discord age-restriction requirements, if applicable to particular content or deployment, must be described separately from Wilhelmina's own product-level birthday/induction behavior.
+Owner decision, 2026-10-26: this is a fun project for five known adults. The minimum-age induction policy was not requested and is removed. Do not introduce age verification, an age-based profile gate, or a replacement policy ceremony. Preserve the full birthday and local age calculation for character context; reject malformed/future dates as ordinary data validation. Applicable external content constraints remain separate from product admission rules.
 
 # 8. Memory philosophy
 
@@ -554,7 +542,7 @@ These are real features in `main`. Some are disabled by default behind feature f
 | Living Command Grimoire | dynamic `/help`, categories, pagination, public/private display, live command discovery | **MERGED** |
 | Covenant Gate | `/rules` plus private `/rules-admin` versioning, publishing and acceptance tracking | **MERGED** |
 | Coven Registry | durable home-guild membership records, public registry cards/index, join/archive/induction state and registry admin controls | **MERGED**; loaded with Covenant Gate |
-| Member Identity / induction profile | private preferred name + full birth date, locally derived age, identity admin surface, Covenant-linked induction modal | **MERGED**; under-18 behavior remains **PRODUCT DECISION PENDING** |
+| Member Identity / induction profile | private preferred name + full birth date, locally derived age, identity admin surface, Covenant-linked induction modal | **MERGED**; no product age gate; birthday retained for context |
 | Invite helper | `/invite` authorization/install helper | **MERGED** |
 | Roll | `/roll` dice experience | **MERGED** |
 | Magic 8-Ball | `/8ball` question/answer experience | **MERGED** |
@@ -955,7 +943,7 @@ Additional work required before or alongside later phases includes:
 - removing accidental product assumptions discovered during audit;
 - aligning persona/privacy/product doctrine;
 - deliberately designing the evolving personality-analysis layer;
-- resolving explicit product decisions such as the current project-level 18+ gate;
+- preserving the owner-approved absence of a product age gate;
 - production deployment, backups, monitoring, recovery, and **live validation as the final project-wide proving stage after the remaining approved feature build is complete**.
 
 Do not skip dependency order merely because a later feature is more exciting unless the product owner explicitly approves parallel work.
