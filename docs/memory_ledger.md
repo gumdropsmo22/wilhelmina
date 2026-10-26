@@ -20,7 +20,7 @@ Current Discord display name remains in the Coven Registry and is joined into tr
 
 Schema v12 physically removes the former `adult_memory_consent_at` and `memory_consent_version` fields. Memory/chat authorization does not depend on a consent phrase or disclosure-version token. A completed private profile is only the identity prerequisite; runtime/source/privacy gates remain separate.
 
-The existing under-18 profile-completion behavior remains unchanged and is **PRODUCT DECISION PENDING**.
+No product age gate is enforced; birthday context is retained (owner decision, 2026-10-26).
 
 ### Memory Ledger — schema v9
 

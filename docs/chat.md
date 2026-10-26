@@ -228,5 +228,4 @@ Through Phase 6D, chat still does not add:
 - streaming;
 - image generation;
 - a new consent/version gate;
-- changes to the unresolved under-18 behavior;
 - the separately policy-gated permanent/evolving personality dossier.

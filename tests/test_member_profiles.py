@@ -7,7 +7,6 @@ from services import audit_log
 from services import coven_registry as registry
 from services import member_profiles
 from services.database import connect, initialize_database, managed_connection
-from services.member_identity import MemberIdentityError
 
 
 def _bootstrap(path, *, guild_id: int = 1) -> None:
@@ -106,26 +105,25 @@ def test_identity_survives_a_new_database_connection(tmp_path) -> None:
     assert eligible is True
 
 
-def test_underage_profile_does_not_change_registry_name(tmp_path) -> None:
+def test_profile_completion_has_no_age_gate(tmp_path) -> None:
     path = tmp_path / "identity.sqlite3"
     _bootstrap(path)
 
     with managed_connection(path) as connection:
-        with pytest.raises(MemberIdentityError, match="at least 18"):
-            member_profiles.save_member_identity(
-                connection,
-                guild_id=1,
-                user_id=300,
-                discord_display_name="Changed Too Soon",
-                preferred_name="Member",
-                birth_date="2010-01-01",
-                today=date(2026, 8, 6),
-                actor_user_id=300,
-            )
+        member_profiles.save_member_identity(
+            connection,
+            guild_id=1,
+            user_id=300,
+            discord_display_name="Changed Too Soon",
+            preferred_name="Member",
+            birth_date="2010-01-01",
+            today=date(2026, 8, 6),
+            actor_user_id=300,
+        )
         entry = registry.get_entry(connection, guild_id=1, user_id=300)
 
     assert entry is not None
-    assert entry.display_name == "Old Screen Name"
+    assert entry.display_name == "Changed Too Soon"
 
 
 def test_display_name_refresh_keeps_preferred_name_and_birth_date(tmp_path) -> None:
