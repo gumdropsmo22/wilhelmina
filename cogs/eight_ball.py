@@ -29,7 +29,7 @@ class EightBall(commands.Cog):
         intent = choose_intent()
         answer = await generate_answer(intent)
         description = f"Q: {format_question(question)}\nA: {answer}"
-        embed = embeds.system_embed(header="▒▒ 8-BALL ▒▒", description=description)
+        embed = embeds.system_embed(header="▒▒ 8-BALL ▒▒", description=description[:4096])
         await interaction.followup.send(embed=embed)
 
 

@@ -7,7 +7,7 @@ Wilhelmina is a Python Discord bot built with `discord.py` for one small, privat
 - **Canonical product inventory and engineering rules:** `AGENTS.md` sections 16A and 28. Consult those before proposing new feature work.
 - **Built/merged, not final-live-validated:** core/admin/help, Covenant Gate, Registry, member identity, Memory Ledger and extraction, memory-aware Chat, Welcome, Tarot, divination commands and automated Daily Broadcasts. Many optional features intentionally default to disabled.
 - **Still unbuilt:** evolving personality/social analysis and Image Generation. The latter has a historical Image Module concept in `docs/technical-report.md`, not a current finalized command contract.
-- **Owner decision pending:** existing under-18 induction gate. Optional ambient server collection/participation is separate and not approved by default.
+- **Owner decision (2026-10-26):** no product age gate. Birthday context remains; ambient collection remains separately scoped.
 - **Launch work remaining:** finish broadcast news/astronomy feed setup, Discord intents and permissions, private OpenAI retention posture, feature flags, backups/recovery and full end-to-end Discord/provider validation.
 - **Retired feature labels:** standalone `/readings`, `/rituals`, public `/broadcast`, and generic Trial/game/event modules. Real `/broadcast-admin` and `/tarot` remain.
 - **Repository cleanup/handoff:** `docs/maintenance/repo-hygiene-handoff-2026-10-25.md`. **Final QA checklist:** `docs/testing_phase_checklist.md`. **Historical/non-canonical technical design:** `docs/technical-report.md`. PR merges and automated CI do not equal live Discord validation.
@@ -164,7 +164,7 @@ schema_migrations
 
 Phase 6 adds **no chat transcript table**. Its recent conversation history, duplicate-message state, conversation locks, and provider-concurrency state exist only in process memory and reset on bot restart. The Memory Ledger remains the durable long-term memory system.
 
-Private identity schema v12 stores preferred name, full canonical birth date, and timestamps; current Discord display name remains in the Coven Registry. The obsolete adult-memory-consent timestamp/version columns are physically removed. The existing under-18 profile-completion behavior remains unchanged and is a separate product decision.
+Private identity schema v12 stores preferred name, full canonical birth date, and timestamps; current Discord display name remains in the Coven Registry. The obsolete adult-memory-consent timestamp/version columns are physically removed. No product age gate is enforced; birthday context is retained (owner decision, 2026-10-26).
 
 The stored guild configuration is the source of truth for server role/channel IDs after Phase 2. Environment variables for role/channel IDs are not used by the new config layer.
 
@@ -187,7 +187,7 @@ Both commands accept an optional question and a Public/Private visibility choice
 
 Card selection and orientation are authoritative local application logic using `SystemRandom`; OpenAI receives the frozen draw only for interpretation and cannot redraw or flip cards. Provider failure preserves the same draw and falls back to local card meanings instead of failing the reading.
 
-Custom Tarot artwork is optional. Text-only readings remain fully functional with no image assets. Stable card artwork keys support later PNG/JPG/WEBP files, and the optional `tarot-art` dependency can rotate reversed artwork when available. No Tarot-specific history, automatic memory, daily-card system, larger spread, or alternative deck is added by this tranche.
+Custom Tarot artwork is optional. Text-only readings remain fully functional with no image assets. Stable card artwork keys support later PNG/JPG/WEBP files, and the optional `tarot-artwork` dependency can rotate reversed artwork when available. No Tarot-specific history, automatic memory, daily-card system, larger spread, or alternative deck is added by this tranche.
 
 See `docs/tarot.md` for the feature contract and deferred live-validation checklist.
 
@@ -291,7 +291,7 @@ The current speaker receives their complete **permitted** active profile: `cross
 
 Phase 5 also expands revealable contradiction partners, includes bounded receipt evidence, preserves `Fact`/`Inference`/`Impression`/unverified `Gossip`, and re-runs the deterministic hard-secret guard at retrieval time so a malformed or legacy credential-containing row cannot be resurrected into a prompt. Corruption-tolerant retrieval also rechecks guild isolation, valid privacy/reveal combinations, Admin-note invariants, and recognizable private-key formats before context can escape the service layer.
 
-The service uses the speaker's trusted identity context, including current Discord display name, preferred name, full canonical birth date, and locally calculated age. The existing under-18 profile-completion behavior remains **PRODUCT DECISION PENDING** and Phase 5 does not expand it.
+The service uses the speaker's trusted identity context, including current Discord display name, preferred name, full canonical birth date, and locally calculated age. No product age gate is enforced; birthday context is retained (owner decision, 2026-10-26).
 
 This phase does **not** build the separately policy-gated permanent/evolving personality-analysis dossier, does not add ambient whole-server listening, does not create a new consent/version gate, does not call OpenAI, and does not persist a new context table.
 
@@ -319,7 +319,7 @@ Short-term continuity is process-local and bounded to 24 entries / 24,000 conten
 
 Generated replies are capped at 1,900 characters, suppress author/role/everyone pings, and use deterministic fallback copy when the private provider is unavailable or misconfigured. No prompt, response text, memory summary, evidence excerpt, birthday, or message content is written to operational logs.
 
-Phase 6 through 6C adds no permanent transcript table, no ambient whole-server listener, no image generation, no new consent/version gate, no under-18 redesign, and no permanent/evolving personality dossier.
+Phase 6 through 6C adds no permanent transcript table, no ambient whole-server listener, no image generation, no new consent/version gate, and no permanent/evolving personality dossier. No product age gate is enforced; birthday context is retained (owner decision, 2026-10-26).
 
 See `docs/chat.md` for the routing matrix, memory audience rules, prompt/provider contract, continuity boundaries, reliability behavior, tests, and rollback.
 

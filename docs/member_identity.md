@@ -22,11 +22,9 @@ This deliberately gives Wilhelmina enough context to use age, birthday timing, a
 
 The same information must not be copied into general-purpose commands, operational logs, public Registry cards, error messages, or unrelated AI features. Local code decides which member/profile and interaction are in scope before constructing the trusted identity object.
 
-## Current under-18 behavior — PRODUCT DECISION PENDING
+## Birthday context without an age gate
 
-The existing runtime behavior remains unchanged: a birth date that calculates to under eighteen blocks completion of the identity profile. Future dates and malformed dates are rejected. February 29 birthdays use February 28 as the anniversary in non-leap years for age calculation.
-
-This is preserved only because the age rule is a separate unresolved product decision. The consent cleanup does not expand, remove, or reinterpret it.
+Owner decision (2026-10-26): no minimum-age induction gate. This is a fun project for five known adults. Full birthdays and locally calculated age remain character context. Malformed and future dates remain invalid.
 
 ## Identity profile and memory eligibility
 

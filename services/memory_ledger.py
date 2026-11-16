@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
+import unicodedata
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
@@ -10,6 +11,7 @@ from services import audit_log
 from services.database import utc_now_iso
 
 MEMORY_SCHEMA_VERSION = 9
+UNICODE_KEY_SCHEMA_VERSION = 13
 
 VALID_CATEGORIES = (
     "Identity",
@@ -31,22 +33,6 @@ VALID_REVEAL_SCOPES = ("cross_member", "owner_only", "admin_only")
 VALID_ENTITY_TYPES = ("subject", "member", "topic", "term")
 RESERVED_ENTITY_TYPES = frozenset({"subject", "topic"})
 
-BLOCKED_PATTERNS = (
-    re.compile(r"\bpassword\b", re.IGNORECASE),
-    re.compile(
-        r"\b(?:api[ _-]?key|access[ _-]?token|refresh[ _-]?token|bearer token|login credential)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\b(?:bank account|routing number|credit card|debit card|cvv|iban)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\b(?:passport|national id|identity document|social security|ssn)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(r"\b(?:home address|residential address)\b", re.IGNORECASE),
-)
 
 
 class MemoryLedgerError(RuntimeError):
@@ -456,6 +442,14 @@ def initialize_memory_schema(connection: sqlite3.Connection) -> None:
     _ensure_record_indexes(connection)
     _ensure_receipt_indexes(connection)
     _ensure_memory_search(connection, rebuild=not already_v9)
+    if not _migration_applied(connection, UNICODE_KEY_SCHEMA_VERSION):
+        # Retain rows/evidence; temporarily free old keys before deterministic rekeying.
+        rows = connection.execute("SELECT id, category, summary FROM memory_records").fetchall()
+        connection.execute("UPDATE memory_records SET normalized_key='migration13:' || id")
+        for row in rows:
+            connection.execute("UPDATE memory_records SET normalized_key=? WHERE id=?",
+                               (normalize_memory_key(row['category'], row['summary']), row['id']))
+        connection.execute("INSERT INTO schema_migrations(version, applied_at) VALUES(13, ?)", (utc_now_iso(),))
     if not already_v9:
         _backfill_system_entities(connection)
     connection.execute(
@@ -551,10 +545,15 @@ def _clean_text(value: str, *, field: str, limit: int = 1000) -> str:
 
 
 def _validate_content(*values: str) -> None:
-    joined = "\n".join(values)
-    for pattern in BLOCKED_PATTERNS:
-        if pattern.search(joined):
-            raise BlockedMemoryContent("Memory contains prohibited dangerous-secret information")
+    from services.chat_response import ChatInputRejected, validate_chat_output
+
+    for value in values:
+        if not value.strip():
+            continue
+        try:
+            validate_chat_output(value)
+        except ChatInputRejected as exc:
+            raise BlockedMemoryContent("Memory contains prohibited dangerous-secret information") from exc
 
 
 def validate_extractable_text(text: str) -> str:
@@ -566,19 +565,19 @@ def validate_extractable_text(text: str) -> str:
 
 
 def normalize_memory_key(category: str, summary: str) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", " ", summary.lower()).strip()
+    normalized = re.sub(r"[\W_]+", " ", unicodedata.normalize("NFKC", summary).casefold()).strip()
     return hashlib.sha256(f"{category.lower()}:{normalized}".encode("utf-8")).hexdigest()
 
 
 def normalize_topic_key(value: str) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", ".", value.lower()).strip(".")
+    normalized = re.sub(r"[\W_]+", ".", unicodedata.normalize("NFKC", value).casefold()).strip(".")
     if not normalized:
         raise MemoryLedgerError("topic_key cannot be empty")
     return normalized[:255]
 
 
 def normalize_entity_key(value: str) -> str:
-    normalized = re.sub(r"[^a-z0-9._:-]+", ".", value.lower()).strip(".")
+    normalized = re.sub(r"[^\w.:-]+", ".", unicodedata.normalize("NFKC", value).casefold()).strip(".")
     if not normalized:
         raise MemoryLedgerError("entity_key cannot be empty")
     return normalized[:255]
@@ -1293,10 +1292,10 @@ def list_contradictions(
 
 def _normalize_search_query(query: str) -> str:
     cleaned = _clean_text(query, field="search query", limit=500)
-    tokens = re.findall(r"[a-z0-9]+", cleaned.lower())[:12]
+    tokens = re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", cleaned).casefold())[:12]
     if not tokens:
         raise MemoryLedgerError("search query contains no searchable terms")
-    return " AND ".join(f'"{token}"' for token in tokens)
+    return " OR ".join(f'"{token}"' for token in tokens)
 
 
 def _validate_reveal_scopes(reveal_scopes: Sequence[str]) -> tuple[str, ...]:

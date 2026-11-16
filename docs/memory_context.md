@@ -154,7 +154,7 @@ The trusted identity section contains the already-approved local context:
 
 There is no adult-memory-consent/version permission gate.
 
-The existing under-18 profile-completion behavior remains **PRODUCT DECISION PENDING** and is not changed or expanded in Phase 5.
+No product age gate is enforced; birthday context is retained (owner decision, 2026-10-26).
 
 ## Personality-analysis boundary
 

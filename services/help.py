@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-ADMIN_ROOTS = {"admin", "rules-admin"}
+ADMIN_ROOTS = {"admin", "rules-admin", "memory-admin", "identity-admin", "registry-admin", "broadcast-admin"}
 CATEGORY_LABELS = {
     "core": "Basics",
     "divination": "Divination",
@@ -182,7 +182,7 @@ def build_embed(page: HelpPage, *, intro: str) -> discord.Embed:
         description=intro,
         color=0x6E00FF,
     )
-    embed.set_author(name="WILHELMINA • GRIMOIRE", icon_url="cdn/witch-sigil.png")
+    embed.set_author(name="WILHELMINA • GRIMOIRE")
 
     category_description = CATEGORY_DESCRIPTIONS.get(page.category)
     if category_description:
